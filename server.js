@@ -25,6 +25,10 @@ const normalize = symbol => {
   return s === "SVOG" ? "SGOV" : s;
 };
 
+function escapeRegExp(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 async function textFrom(url) {
   const res = await fetch(url, {
     headers: {
@@ -90,20 +94,81 @@ async function yahooYields(symbols) {
   }).filter(Boolean);
 }
 
-async function yahooQuotes(symbols) {
+const tradingViewQuoteExchangeOrder = {
+  SPY: ["AMEX", "NYSEARCA", "ARCA", "NYSE", "NASDAQ"],
+  BIL: ["AMEX", "NYSEARCA", "ARCA", "NYSE", "NASDAQ"],
+  SGOV: ["AMEX", "NYSEARCA", "ARCA", "NYSE", "NASDAQ"],
+  QQQ: ["NASDAQ", "AMEX", "NYSEARCA", "ARCA", "NYSE"],
+  IWM: ["AMEX", "NYSEARCA", "ARCA", "NYSE", "NASDAQ"],
+  VOO: ["NYSEARCA", "AMEX", "ARCA", "NYSE", "NASDAQ"],
+  IVV: ["NYSEARCA", "AMEX", "ARCA", "NYSE", "NASDAQ"]
+};
+
+function quoteExchangeCandidates(symbol) {
+  return tradingViewQuoteExchangeOrder[symbol] || ["NASDAQ", "NYSE", "AMEX", "NYSEARCA", "ARCA", "BATS", "CBOE", "OTC"];
+}
+
+function tradingViewSymbolUrl(exchange, symbol) {
+  return `https://tw.tradingview.com/symbols/${exchange}-${encodeURIComponent(symbol)}/`;
+}
+
+function extractTradingViewQuote(html, symbol) {
+  const flat = String(html || "").replace(/\s+/g, " ");
+  const sym = escapeRegExp(symbol);
+  const patterns = [
+    new RegExp(`(?:The current price of|current price of)\\s+${sym}\\s+is\\s+([0-9][0-9,]*(?:\\.[0-9]+)?)\\s*USD`, "i"),
+    new RegExp(`(?:${sym}\\s+trades at|${sym}\\s+stock price today is|${sym}\\s+price today is)\\s+([0-9][0-9,]*(?:\\.[0-9]+)?)\\s*USD`, "i"),
+    new RegExp(`(?:price of\\s+${sym}|${sym}\\s+price)\\s+is\\s+([0-9][0-9,]*(?:\\.[0-9]+)?)\\s*USD`, "i"),
+    new RegExp(`\\b${sym}\\b[^\\d]{0,120}?([0-9][0-9,]*(?:\\.[0-9]+)?)\\s*USD`, "i")
+  ];
+  for (const pattern of patterns) {
+    const match = flat.match(pattern);
+    if (!match) continue;
+    const price = Number(String(match[1]).replaceAll(",", ""));
+    if (Number.isFinite(price) && price > 0) return price;
+  }
+  return null;
+}
+
+async function tradingViewQuote(symbol) {
+  const unique = normalize(symbol);
+  if (!unique) return null;
+  for (const exchange of quoteExchangeCandidates(unique)) {
+    try {
+      const html = await textFrom(tradingViewSymbolUrl(exchange, unique));
+      const price = extractTradingViewQuote(html, unique);
+      if (!price) continue;
+      return {
+        symbol: unique,
+        price,
+        changePercent: null,
+        source: `TradingView official symbol page (${exchange})`,
+        updatedAt: new Date().toISOString()
+      };
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+async function tradingViewQuotes(symbols) {
   const unique = [...new Set(symbols.map(normalize).filter(Boolean))];
-  if (!unique.length) return [];
-  const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(unique.join(","))}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Yahoo ${res.status}`);
-  const json = await res.json();
-  return (json.quoteResponse?.result || []).map(q => ({
-    symbol: normalize(q.symbol),
-    price: Number(q.regularMarketPrice ?? q.postMarketPrice ?? q.preMarketPrice ?? 0),
-    changePercent: Number(q.regularMarketChangePercent ?? 0),
-    source: "Yahoo Finance quote",
-    updatedAt: new Date().toISOString()
-  })).filter(q => q.symbol && q.price > 0);
+  const quotes = [];
+  const errors = [];
+  for (const symbol of unique) {
+    try {
+      const quote = await tradingViewQuote(symbol);
+      if (quote) {
+        quotes.push(quote);
+      } else {
+        errors.push({ source: `TradingView ${symbol}`, message: "No price parsed from official symbol page" });
+      }
+    } catch (e) {
+      errors.push({ source: `TradingView ${symbol}`, message: String(e?.message || e) });
+    }
+  }
+  return { quotes, errors };
 }
 
 async function yieldResponse(symbols) {
@@ -152,8 +217,8 @@ http.createServer(async (req, res) => {
     }
     if (url.pathname === "/api/quotes") {
       const symbols = String(url.searchParams.get("symbols") || "").split(",");
-      const quotes = await yahooQuotes(symbols).catch(() => []);
-      send(res, 200, JSON.stringify({ quotes }), "application/json; charset=utf-8");
+      const payload = await tradingViewQuotes(symbols);
+      send(res, 200, JSON.stringify(payload), "application/json; charset=utf-8");
       return;
     }
 

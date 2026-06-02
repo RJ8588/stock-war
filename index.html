@@ -521,15 +521,7 @@
             <h2>TradingView 即時股價</h2>
             <span class="note">持股 ticker 會自動同步到右側行情列表</span>
           </div>
-          <div class="tv-box">
-            <div class="tv-fallback">
-              <div>正在載入 TradingView 即時行情。若外部 widget 被阻擋，下方會顯示本機備援報價。</div>
-              <div id="quoteFallback" class="quote-fallback-grid"></div>
-            </div>
-            <div class="tradingview-widget-container">
-              <div class="tradingview-widget-container__widget"></div>
-            </div>
-          </div>
+          <div class="tradingview-widget-container"><div class="tradingview-widget-container__widget"></div></div>
         </div>
         <div class="panel">
           <div class="panel-head"><h2>資產配置</h2></div>
@@ -755,6 +747,9 @@
     let lastAmountEdited = false;
     let lastTradingViewSymbols = "";
     let lastQuoteFetchSymbols = "";
+    let lastQuoteFetchAt = 0;
+    let quoteRefreshTimer = null;
+    let quoteRefreshInFlight = false;
     let deferredRenderTimer = null;
     let isEditingTableField = false;
     let pendingRenderAfterEdit = false;
@@ -1101,7 +1096,7 @@
       renderAllocation(metrics, positions);
       renderBil(metrics);
       renderTradingView(positions);
-      renderQuoteFallback(positions);
+      refreshTradingViewQuotes(true);
     }
     function renderKpis(m) {
       const items = [
@@ -1440,39 +1435,52 @@
       });
       container.appendChild(s);
     }
-    function renderQuoteFallback(positions) {
-      const box = document.getElementById("quoteFallback");
-      if (!box) return;
-      const rows = (positions.length ? positions : calcPositions()).filter(p => p.symbol);
-      box.innerHTML = rows.map(p => `
-        <div class="quote-card">
-          <div class="symbol">${p.symbol}</div>
-          <div class="price">${money(p.current || p.avg || 0)}</div>
-          <div class="source">${p.meta.quoteSource || "持股明細現價"}${p.meta.quoteUpdatedAt ? ` ｜ ${new Date(p.meta.quoteUpdatedAt).toLocaleTimeString("zh-TW")}` : ""}</div>
-        </div>`).join("") || `<div class="note">新增持股後顯示備援報價</div>`;
-      refreshFallbackQuotes(rows);
+    function tradingViewQuoteSymbols(positions) {
+      const symbols = positions.length ? positions.map(p => p.symbol) : ["QQQ", "SPY", "BIL"];
+      return [...new Set(symbols.map(s => String(s || "").trim().toUpperCase()).filter(Boolean))];
     }
-    async function refreshFallbackQuotes(positions) {
-      const symbols = positions.map(p => p.symbol).filter(Boolean);
-      const signature = symbols.join(",");
-      if (!symbols.length || signature === lastQuoteFetchSymbols) return;
-      lastQuoteFetchSymbols = signature;
-      try {
-        const response = await fetch(`/api/quotes?symbols=${encodeURIComponent(signature)}`, { cache: "no-store" });
-        if (!response.ok) return;
-        const payload = await response.json();
-        let changed = false;
-        for (const q of payload.quotes || []) {
-          const meta = ensureSymbol(q.symbol);
-          if (Number(q.price) > 0 && Number(meta.currentPrice) !== Number(q.price)) {
-            meta.currentPrice = Number(q.price);
-            meta.quoteSource = q.source || "Yahoo Finance";
-            meta.quoteUpdatedAt = q.updatedAt || new Date().toISOString();
-            changed = true;
-          }
+    function applyTradingViewQuotes(quotes) {
+      let changed = false;
+      for (const quote of quotes || []) {
+        const symbol = String(quote?.symbol || "").trim().toUpperCase();
+        const price = Number(quote?.price || 0);
+        if (!symbol || !price) continue;
+        ensureSymbol(symbol);
+        if (Number(state.symbols[symbol].currentPrice || 0) !== price) {
+          state.symbols[symbol].currentPrice = price;
+          changed = true;
         }
+      }
+      return changed;
+    }
+    async function refreshTradingViewQuotes(silent = true) {
+      if (!canUseTradingView || location.protocol === "file:") return false;
+      if (quoteRefreshInFlight) return false;
+      const symbols = tradingViewQuoteSymbols(calcPositions());
+      if (!symbols.length) return false;
+      const signature = symbols.join(",");
+      const now = Date.now();
+      if (signature === lastQuoteFetchSymbols && now - lastQuoteFetchAt < 30000) return false;
+      quoteRefreshInFlight = true;
+      try {
+        const response = await fetch(`/api/quotes?symbols=${encodeURIComponent(symbols.join(","))}`, { cache: "no-store" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json();
+        const changed = applyTradingViewQuotes(Array.isArray(payload?.quotes) ? payload.quotes : []);
+        lastQuoteFetchSymbols = signature;
+        lastQuoteFetchAt = now;
         if (changed) render();
-      } catch {}
+        return changed;
+      } catch (error) {
+        if (!silent) alert(`TradingView 即時報價抓取失敗：${String(error?.message || error)}`);
+        return false;
+      } finally {
+        quoteRefreshInFlight = false;
+      }
+    }
+    function ensureTradingViewQuotePolling() {
+      if (quoteRefreshTimer) return;
+      quoteRefreshTimer = setInterval(() => refreshTradingViewQuotes(true), 30000);
     }
     function chartOpts() {
       return {
@@ -1490,15 +1498,7 @@
             <h2>TradingView 即時股價</h2>
             <span class="note">持股代號會同步顯示；現價同步更新到持股明細</span>
           </div>
-          <div class="tv-box">
-            <div class="tv-fallback">
-              <div>載入 TradingView 中，若被阻擋會使用下方備援報價。</div>
-              <div id="quoteFallback" class="quote-fallback-grid"></div>
-            </div>
-            <div class="tradingview-widget-container">
-              <div class="tradingview-widget-container__widget"></div>
-            </div>
-          </div>
+          <div class="tradingview-widget-container"><div class="tradingview-widget-container__widget"></div></div>
         </div>
         <div class="panel">
           <div class="panel-head"><h2>資產配置</h2></div>
@@ -1862,12 +1862,8 @@
     setupAllocationAndYieldLayout();
     bindEvents();
     render();
+    ensureTradingViewQuotePolling();
     refreshShortYield(true);
-    setInterval(() => {
-      const rows = calcPositions();
-      if (!rows.length) return;
-      refreshFallbackQuotes(rows);
-    }, 30000);
   </script>
 </body>
 </html>
