@@ -352,7 +352,35 @@
       border-radius: 50%;
       background: var(--swatch);
     }
-    .allocation-item strong { color: var(--text); }
+    .allocation-meta {
+      display: grid;
+      gap: 2px;
+      min-width: 0;
+    }
+    .allocation-name {
+      color: var(--text);
+      font-weight: 700;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .allocation-value {
+      display: grid;
+      justify-items: end;
+      gap: 2px;
+      text-align: right;
+      min-width: 0;
+    }
+    .allocation-value strong {
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1.2;
+    }
+    .allocation-pct {
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.1;
+    }
     .subpanel {
       margin-top: 12px;
       border-top: 1px solid var(--line-soft);
@@ -667,6 +695,23 @@
       SGOV: { rate: 3.54, source: "iShares(SGOV) 30-Day SEC Yield snapshot", updatedAt: "2026-05-22T16:00:00-04:00" }
     };
     const allocationColors = ["#2fd0a5", "#4aa3ff", "#f7b955", "#ff5f70", "#9b8cff", "#66d9ef", "#f78fb3", "#a3e635", "#f97316", "#94a3b8"];
+    const hexToRgb = hex => {
+      const normalized = String(hex || "").replace("#", "");
+      const value = normalized.length === 3
+        ? normalized.split("").map(c => c + c).join("")
+        : normalized.padEnd(6, "0").slice(0, 6);
+      const int = Number.parseInt(value, 16);
+      return {
+        r: (int >> 16) & 255,
+        g: (int >> 8) & 255,
+        b: int & 255
+      };
+    };
+    const contrastTextColor = hex => {
+      const { r, g, b } = hexToRgb(hex);
+      const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b);
+      return luminance > 150 ? "#0b1220" : "#f8fbff";
+    };
     const allocationLabelsPlugin = {
       id: "allocationLabels",
       afterDatasetsDraw(chart) {
@@ -680,14 +725,20 @@
         ctx.font = "700 12px Inter, sans-serif";
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.fillStyle = "#e7eefb";
         meta.data.forEach((arc, index) => {
           const value = Number(dataset.data[index] || 0);
           const ratio = value / total;
           if (ratio < 0.035) return;
           const pos = arc.tooltipPosition();
           const label = chart.data.labels[index];
+          const sliceColor = dataset.backgroundColor[index] || "#e7eefb";
+          const textColor = contrastTextColor(sliceColor);
+          ctx.lineWidth = 4;
+          ctx.strokeStyle = textColor === "#f8fbff" ? "rgba(8,11,16,.85)" : "rgba(255,255,255,.85)";
+          ctx.fillStyle = textColor;
+          ctx.strokeText(`${label}`, pos.x, pos.y - 7);
           ctx.fillText(`${label}`, pos.x, pos.y - 7);
+          ctx.strokeText(`${pctFmt.format(ratio * 100)}%`, pos.x, pos.y + 8);
           ctx.fillText(`${pctFmt.format(ratio * 100)}%`, pos.x, pos.y + 8);
         });
         ctx.restore();
@@ -1312,8 +1363,13 @@
             const color = allocationColors[index % allocationColors.length];
             return `<div class="allocation-item">
               <span class="allocation-swatch" style="--swatch:${color}"></span>
-              <span>${row.label} <strong>${pctFmt.format(ratio)}%</strong></span>
-              <strong>${money(row.value)}</strong>
+              <div class="allocation-meta">
+                <span class="allocation-name">${row.label}</span>
+              </div>
+              <div class="allocation-value">
+                <strong>${money(row.value)}</strong>
+                <span class="allocation-pct">(${pctFmt.format(ratio)}%)</span>
+              </div>
             </div>`;
           }).join("") || `<div class="note">尚無資產資料</div>`}
         </div>`;
