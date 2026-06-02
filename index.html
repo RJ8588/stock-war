@@ -1,0 +1,1871 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>美股投資戰情室 Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <style>
+    :root {
+      --bg: #080b10;
+      --panel: #101722;
+      --panel-2: #151e2c;
+      --line: #253143;
+      --line-soft: #1c2635;
+      --text: #e7eefb;
+      --muted: #91a1b8;
+      --accent: #2fd0a5;
+      --accent-2: #4aa3ff;
+      --warn: #f7b955;
+      --bad: #ff5f70;
+      --good: #2fd0a5;
+      --shadow: 0 22px 60px rgba(0,0,0,.35);
+      --radius: 8px;
+      color-scheme: dark;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: radial-gradient(circle at 24% -10%, rgba(47,208,165,.14), transparent 30%),
+                  radial-gradient(circle at 82% 0%, rgba(74,163,255,.12), transparent 28%),
+                  var(--bg);
+      color: var(--text);
+      font-family: Inter, "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
+      letter-spacing: 0;
+    }
+    button, input, select, textarea { font: inherit; }
+    .app { min-height: 100vh; }
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      border-bottom: 1px solid var(--line);
+      background: rgba(8, 11, 16, .92);
+      backdrop-filter: blur(18px);
+    }
+    .topbar {
+      max-width: 1480px;
+      margin: 0 auto;
+      padding: 16px;
+      display: flex;
+      gap: 14px;
+      align-items: center;
+      justify-content: space-between;
+    }
+    h1 {
+      margin: 0;
+      font-size: 22px;
+      line-height: 1.15;
+      font-weight: 800;
+    }
+    .subtitle { color: var(--muted); font-size: 13px; margin-top: 4px; }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+    button {
+      border: 1px solid var(--line);
+      background: #131c29;
+      color: var(--text);
+      border-radius: var(--radius);
+      min-height: 38px;
+      padding: 8px 12px;
+      cursor: pointer;
+      transition: .15s ease;
+      white-space: nowrap;
+    }
+    button:hover { border-color: var(--accent-2); transform: translateY(-1px); }
+    .primary { background: linear-gradient(135deg, #1ca783, #2177cf); border-color: transparent; color: white; }
+    .danger { color: #ffd8dd; border-color: rgba(255,95,112,.45); }
+    main {
+      max-width: 1480px;
+      margin: 0 auto;
+      padding: 18px 16px 38px;
+      display: grid;
+      gap: 16px;
+    }
+    .grid { display: grid; gap: 16px; }
+    .kpis { grid-template-columns: repeat(6, minmax(150px, 1fr)); }
+    .layout { grid-template-columns: 1.25fr .75fr; align-items: start; }
+    .layout-vertical { grid-template-columns: 1fr; }
+    .triple { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .panel {
+      background: rgba(16, 23, 34, .94);
+      border: 1px solid var(--line-soft);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .panel-head {
+      padding: 14px 14px 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border-bottom: 1px solid var(--line-soft);
+    }
+    .panel h2 { margin: 0; font-size: 15px; }
+    .panel-body { padding: 14px; }
+    .kpi {
+      padding: 14px;
+      border-radius: var(--radius);
+      background: linear-gradient(180deg, rgba(21,30,44,.98), rgba(14,20,30,.98));
+      border: 1px solid var(--line-soft);
+      min-height: 98px;
+    }
+    .kpi .label { color: var(--muted); font-size: 12px; margin-bottom: 8px; }
+    .kpi .value { font-size: 22px; font-weight: 800; overflow-wrap: anywhere; }
+    .kpi .hint { color: var(--muted); font-size: 12px; margin-top: 8px; }
+    .good { color: var(--good); }
+    .bad { color: var(--bad); }
+    .warn { color: var(--warn); }
+    .muted { color: var(--muted); }
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(110px, 1fr));
+      gap: 10px;
+      align-items: end;
+    }
+    label { display: grid; gap: 6px; color: var(--muted); font-size: 12px; }
+    input, select, textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      background: #0c121b;
+      color: var(--text);
+      border-radius: var(--radius);
+      padding: 9px 10px;
+      min-height: 38px;
+      outline: none;
+    }
+    textarea { min-height: 38px; resize: vertical; }
+    input:focus, select:focus, textarea:focus { border-color: var(--accent-2); }
+    .table-wrap { overflow-x: auto; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 980px;
+      font-size: 13px;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line-soft);
+      padding: 10px 8px;
+      text-align: right;
+      vertical-align: middle;
+      white-space: nowrap;
+    }
+    th:first-child, td:first-child, th.left, td.left { text-align: left; }
+    th { color: var(--muted); font-weight: 700; background: rgba(12,18,27,.8); position: sticky; top: 0; }
+    td input, td select, td textarea { min-width: 96px; padding: 7px 8px; }
+    td textarea { min-width: 160px; }
+    .symbol { font-weight: 800; letter-spacing: .4px; }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      min-height: 24px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      color: var(--muted);
+      background: #0c121b;
+      font-size: 12px;
+    }
+    .tp-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+      align-items: start;
+    }
+    .tp-stock-card {
+      display: grid;
+      gap: 12px;
+      min-width: 0;
+      padding: 16px;
+      border: 1px solid rgba(231, 238, 251, .38);
+      border-radius: var(--radius);
+      background: #080d18;
+    }
+    .tp-stock-head {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 12px;
+      align-items: start;
+    }
+    .tp-stock-title {
+      color: #64dffb;
+      font-size: 27px;
+      line-height: 1;
+      font-weight: 900;
+    }
+    .tp-return {
+      color: var(--good);
+      font-size: 24px;
+      line-height: 1;
+      font-weight: 900;
+      text-align: right;
+    }
+    .tp-meta {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px 16px;
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1.35;
+    }
+    .tp-meta b { color: #dcecff; font-weight: 800; }
+    .tp-scale { display: grid; gap: 8px; margin-top: 2px; }
+    .tp-scale-track {
+      position: relative;
+      height: 5px;
+      border-radius: 999px;
+      background: #111827;
+      overflow: hidden;
+    }
+    .tp-scale-fill {
+      height: 100%;
+      width: var(--tp-progress, 0%);
+      border-radius: inherit;
+      background: #57b65f;
+    }
+    .tp-scale-labels {
+      display: flex;
+      justify-content: space-between;
+      color: #c9d7ea;
+      font-size: 10px;
+    }
+    .tp-stage {
+      display: grid;
+      gap: 10px;
+      padding: 14px 14px 12px;
+      border: 1px solid rgba(231, 238, 251, .42);
+      border-radius: var(--radius);
+      background: #050911;
+    }
+    .tp-stage-top {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 12px;
+      align-items: start;
+    }
+    .tp-stage-title {
+      display: inline-grid;
+      grid-template-columns: auto 74px auto;
+      gap: 4px;
+      align-items: center;
+      color: #d8ebff;
+      font-size: 18px;
+      font-weight: 900;
+    }
+    .tp-target-input,
+    .tp-exit-input {
+      min-width: 0;
+      height: 36px;
+      min-height: 36px;
+      padding: 5px 8px;
+      border-color: rgba(231, 238, 251, .42);
+      background: #030712;
+      color: #eaf3ff;
+      text-align: center;
+      font-size: 18px;
+    }
+    .tp-target-price {
+      color: #dcecff;
+      font-size: 18px;
+      font-weight: 900;
+      text-align: right;
+    }
+    .tp-stage-mid {
+      display: grid;
+      grid-template-columns: auto 120px 26px 1fr;
+      gap: 8px;
+      align-items: center;
+      color: #d4e2f2;
+      font-size: 13px;
+    }
+    .tp-stage-mid select {
+      min-width: 0;
+      height: 34px;
+      min-height: 34px;
+      padding: 4px 8px;
+      font-size: 13px;
+    }
+    .tp-stage-result {
+      text-align: right;
+      color: #dcecff;
+      font-size: 13px;
+      line-height: 1.25;
+    }
+    .tp-stage-result b {
+      display: block;
+      color: #dcecff;
+      font-size: 14px;
+    }
+    .tp-bar {
+      height: 5px;
+      border-radius: 999px;
+      background: #111827;
+      overflow: hidden;
+    }
+    .tp-bar span {
+      display: block;
+      height: 100%;
+      width: var(--bar, 0%);
+      border-radius: inherit;
+      background: #64748b;
+    }
+    .tp-reset {
+      justify-self: center;
+      border: 0;
+      background: transparent;
+      min-height: 28px;
+      padding: 0;
+      color: #d9e3f3;
+      text-decoration: underline;
+    }
+    .yield-row {
+      display: grid;
+      grid-template-columns: 1fr 110px;
+      gap: 10px;
+      align-items: center;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--line-soft);
+    }
+    .yield-row:last-child { border-bottom: 0; }
+    .yield-meta { display: grid; gap: 4px; }
+    .yield-symbol { font-weight: 800; }
+    .yield-grid { display: grid; gap: 8px; margin-top: 12px; }
+    .allocation-list {
+      display: grid;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .allocation-item {
+      display: grid;
+      grid-template-columns: 14px 1fr auto;
+      gap: 8px;
+      align-items: center;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .allocation-swatch {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--swatch);
+    }
+    .allocation-item strong { color: var(--text); }
+    .subpanel {
+      margin-top: 12px;
+      border-top: 1px solid var(--line-soft);
+      padding-top: 12px;
+    }
+    .subpanel h3 {
+      margin: 0 0 10px;
+      font-size: 14px;
+      color: var(--text);
+    }
+    .equity-controls {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(140px, 1fr)) auto;
+      gap: 10px;
+      align-items: end;
+      margin-bottom: 14px;
+    }
+    .equity-total-realized {
+      min-height: 38px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 10px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #0c121b;
+      white-space: nowrap;
+      justify-self: end;
+    }
+    .equity-total-realized .label { color: var(--muted); font-size: 12px; }
+    .equity-total-realized .value { font-weight: 800; }
+    .chart-box { height: 310px; }
+    .tv-box { min-height: 520px; background: #0c121b; position: relative; }
+    .tv-fallback {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      align-content: center;
+      gap: 16px;
+      padding: 22px;
+      color: var(--muted);
+      text-align: center;
+      background: linear-gradient(180deg, #0c121b, #101722);
+      z-index: 0;
+    }
+    .tv-widget-container, .tradingview-widget-container__widget { height: 100%; min-height: 520px; }
+    .tv-widget-container { position: relative; z-index: 1; background: transparent; }
+    .tradingview-widget-copyright { display: none; }
+    .quote-fallback-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(130px, 1fr));
+      gap: 10px;
+      max-width: 780px;
+      margin: 0 auto;
+      width: 100%;
+    }
+    .quote-card {
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(8, 13, 24, .92);
+      text-align: left;
+    }
+    .quote-card .symbol { color: #64dffb; font-size: 17px; }
+    .quote-card .price { margin-top: 8px; color: var(--text); font-size: 22px; font-weight: 900; }
+    .quote-card .source { margin-top: 6px; color: var(--muted); font-size: 11px; }
+    .note { color: var(--muted); font-size: 12px; line-height: 1.55; }
+    .settings {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(150px, 1fr));
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .split { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .empty { color: var(--muted); padding: 20px; text-align: center; border: 1px dashed var(--line); border-radius: var(--radius); }
+    .mobile-card { display: none; }
+    @media (max-width: 1180px) {
+      .kpis { grid-template-columns: repeat(3, 1fr); }
+      .layout, .triple, .split { grid-template-columns: 1fr; }
+      .settings { grid-template-columns: repeat(2, 1fr); }
+      .equity-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .tp-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 720px) {
+      .topbar { align-items: flex-start; flex-direction: column; }
+      .actions { width: 100%; justify-content: stretch; }
+      .actions button { flex: 1; }
+      .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .form-grid, .settings { grid-template-columns: 1fr 1fr; }
+      .form-grid label.wide { grid-column: 1 / -1; }
+      .panel-head { align-items: flex-start; flex-direction: column; }
+      .hide-mobile-table { display: none; }
+      .mobile-card {
+        display: grid;
+        gap: 10px;
+      }
+      .position-card {
+        display: grid;
+        gap: 8px;
+        padding: 12px;
+        border: 1px solid var(--line-soft);
+        border-radius: var(--radius);
+        background: #0c121b;
+      }
+      .mini-row { display: flex; justify-content: space-between; gap: 10px; color: var(--muted); font-size: 12px; }
+      .mini-row strong { color: var(--text); font-size: 13px; text-align: right; }
+      .tp-grid { grid-template-columns: 1fr; }
+      .tp-stock-title { font-size: 24px; }
+      .tp-return { font-size: 20px; }
+      .tp-meta { grid-template-columns: 1fr; }
+      .tp-stage-mid { grid-template-columns: auto 96px 22px 1fr; }
+      .tp-stage-title { grid-template-columns: auto 62px auto; font-size: 16px; }
+      .tp-target-input, .tp-exit-input { font-size: 16px; }
+      .quote-fallback-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      h1 { font-size: 19px; }
+    }
+    @media (max-width: 480px) {
+      main { padding: 12px 10px 28px; }
+      .kpis, .form-grid, .settings, .equity-controls { grid-template-columns: 1fr; }
+      .equity-total-realized { justify-self: stretch; }
+      .kpi .value { font-size: 20px; }
+      button { padding: 8px 10px; }
+      .quote-fallback-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="topbar">
+        <div>
+          <h1>美股投資戰情室 Dashboard</h1>
+          <div class="subtitle">TradingView 報價、持股損益、TP Exit Planner、資產曲線與 Excel 匯出</div>
+        </div>
+        <div class="actions">
+          <button class="primary" id="addTradeBtn">新增交易</button>
+          <button id="pickDataFileBtn">選擇資料檔</button>
+          <button id="saveAsDataFileBtn">另存資料檔</button>
+          <button id="saveDataNowBtn">立即儲存</button>
+          <button id="sampleBtn">載入範例</button>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="panel">
+        <div class="panel-head">
+          <h2>帳戶設定</h2>
+          <span class="note">所有輸入會自動保存在本機瀏覽器</span>
+        </div>
+        <div class="panel-body">
+          <div class="settings">
+            <label>期初投入資金 USD<input id="capitalInput" type="number" step="0.01"></label>
+            <label>剩餘現金 USD<input id="cashInput" type="number" step="0.01" readonly></label>
+            <label>台幣 / 美元匯率<input id="fxInput" type="number" step="0.0001"></label>
+            <label>短債 ETF 代號<input id="cashYieldSymbolsInput" placeholder="BIL,SGOV"></label>
+          </div>
+        </div>
+      </section>
+
+      <section class="grid kpis" id="kpis"></section>
+
+      <section class="grid layout">
+        <div class="panel">
+          <div class="panel-head">
+            <h2>TradingView 即時股價</h2>
+            <span class="note">持股 ticker 會自動同步到右側行情列表</span>
+          </div>
+          <div class="tv-box">
+            <div class="tv-fallback">
+              <div>正在載入 TradingView 即時行情。若外部 widget 被阻擋，下方會顯示本機備援報價。</div>
+              <div id="quoteFallback" class="quote-fallback-grid"></div>
+            </div>
+            <div class="tradingview-widget-container">
+              <div class="tradingview-widget-container__widget"></div>
+            </div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>資產配置</h2></div>
+          <div class="panel-body split">
+            <div class="chart-box"><canvas id="allocationChart"></canvas></div>
+            <div>
+              <div class="empty" id="allocationText"></div>
+              <p class="note">持股市值使用你在持股明細輸入的目前股價計算；現金使用帳戶設定。</p>
+            </div>
+          </div>
+          <div class="panel-body subpanel">
+            <h3>國債收益估算</h3>
+            <div id="bilPanel"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>新增 / 編輯交易紀錄</h2>
+          <span class="note">輸入成交價與投入金額會自動換算股數；輸入股數會自動換算投入金額</span>
+        </div>
+        <div class="panel-body">
+          <form id="tradeForm" class="form-grid">
+            <label>日期<input id="tradeDate" type="date"></label>
+            <label>股票<input id="tradeSymbol" placeholder="AAPL"></label>
+            <label>方向<select id="tradeSide"><option>BUY</option><option>SELL</option></select></label>
+            <label>成交價<input id="tradePrice" type="number" step="0.000001"></label>
+            <label>股數<input id="tradeShares" type="number" step="0.000001"></label>
+            <label>投入 / 成交金額<input id="tradeAmount" type="number" step="0.01"></label>
+            <label class="wide">備註<textarea id="tradeNote" placeholder="策略、理由、情緒、風險..."></textarea></label>
+            <button class="primary" type="submit">加入交易</button>
+          </form>
+          <form id="depositForm" class="form-grid" style="margin-top:12px">
+            <label>入金日期<input id="depositDate" type="date"></label>
+            <label>入金金額 USD<input id="depositAmount" type="number" step="0.01"></label>
+            <label class="wide">入金備註<textarea id="depositNote" placeholder="例：薪資入金、加碼本金..."></textarea></label>
+            <button class="primary" type="submit">加入入金</button>
+          </form>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>我的持股明細</h2>
+          <span class="note">相同股票自動合併；核心倉與動能倉固定以目前部位 20% / 80% 精準切分到小數 6 位</span>
+        </div>
+        <div class="panel-body">
+          <div id="positionMobile" class="mobile-card"></div>
+          <div class="table-wrap hide-mobile-table">
+            <table>
+              <thead>
+                <tr>
+                  <th class="left">股票</th><th>股數</th><th>均價</th><th>現價</th><th>總成本</th><th>市值</th><th>未實現損益</th><th>已實現損益</th><th>核心 20%</th><th>動能 80%</th><th>最大投資額</th><th class="left">備註</th>
+                </tr>
+              </thead>
+              <tbody id="positionsBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>TP Exit Planner</h2>
+          <span class="note">每檔股票都能手動調整 TP% 與出場部位%；TP150 預設為全部位 100%</span>
+        </div>
+        <div class="panel-body">
+          <div id="tpBody" class="tp-grid"></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>交易紀錄</h2>
+          <span class="note">直接修改表格欄位即可同步重算持股與 TP Planner</span>
+        </div>
+        <div class="panel-body table-wrap">
+          <table>
+            <thead>
+              <tr><th class="left">日期</th><th>股票</th><th>方向</th><th>成交價</th><th>股數</th><th>金額</th><th>該股已實現損益</th><th class="left">備註</th><th>操作</th></tr>
+            </thead>
+            <tbody id="tradesBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>帳戶資產曲線</h2>
+          <span class="note">可自訂起始月份與新增任意月份；年化報酬與 MDD 由已輸入的月份計算</span>
+        </div>
+        <div class="panel-body" id="equityExportArea">
+          <div class="equity-controls">
+            <label>起始月份<input id="equityStartInput" type="month"></label>
+            <label>查看年份
+              <select id="equityYearFilter">
+                <option value="ALL">全部年份</option>
+              </select>
+            </label>
+            <button id="applyEquityStartBtn" type="button">套用起始月份</button>
+            <button id="exportEquityPngBtn" type="button">匯出資產曲線PNG</button>
+            <div id="equityTotalRealized" class="equity-total-realized">
+              <span class="label">累積總已實現</span>
+              <span class="value">$0.00 (0.00%)</span>
+            </div>
+          </div>
+          <div class="grid layout-vertical">
+            <div class="chart-box"><canvas id="equityChart"></canvas></div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th class="left">月份</th><th>月已實現損益</th><th>年已實現損益</th><th>累積已實現損益</th><th>帳戶資產</th></tr></thead>
+                <tbody id="equityBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const STORAGE_KEY = "us-war-room-dashboard-v1";
+    const STORAGE_BACKUP_KEY = "us-war-room-dashboard-v1:backup";
+    const LEGACY_STORAGE_KEYS = [
+      `us-war-room-dashboard-v1:${encodeURIComponent("/")}`,
+      `us-war-room-dashboard-v1:${encodeURIComponent("/index.html")}`
+    ];
+    const fmt = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
+    const pctFmt = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
+    const six = n => {
+      const value = Number(n || 0);
+      if (!Number.isFinite(value)) return "0";
+      return value.toFixed(6).replace(/\.?0+$/, "");
+    };
+    const money = n => "$" + fmt.format(Number(n || 0));
+    const pct = n => (Number(n || 0) >= 0 ? "+" : "") + pctFmt.format(Number(n || 0)) + "%";
+    const uid = () => Math.random().toString(36).slice(2, 10);
+    const BIL_SOURCE_URL = "https://www.ssga.com/us/en/intermediary/etfs/state-street-spdr-bloomberg-1-3-month-t-bill-etf-bil";
+    const SGOV_SOURCE_URL = "https://www.ishares.com/us/products/314116/ishares-0-3-month-treasury-bond-etf";
+    const yieldSnapshots = {
+      BIL: { rate: 3.49, source: "State Street(BIL) 30-Day SEC Yield snapshot", updatedAt: "2026-05-20T16:00:00-04:00" },
+      SGOV: { rate: 3.54, source: "iShares(SGOV) 30-Day SEC Yield snapshot", updatedAt: "2026-05-22T16:00:00-04:00" }
+    };
+    const allocationColors = ["#2fd0a5", "#4aa3ff", "#f7b955", "#ff5f70", "#9b8cff", "#66d9ef", "#f78fb3", "#a3e635", "#f97316", "#94a3b8"];
+    const allocationLabelsPlugin = {
+      id: "allocationLabels",
+      afterDatasetsDraw(chart) {
+        if (chart.config.type !== "doughnut" || chart.canvas.id !== "allocationChart") return;
+        const { ctx } = chart;
+        const dataset = chart.data.datasets[0];
+        const total = dataset.data.reduce((sum, value) => sum + Number(value || 0), 0);
+        if (!total) return;
+        const meta = chart.getDatasetMeta(0);
+        ctx.save();
+        ctx.font = "700 12px Inter, sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = "#e7eefb";
+        meta.data.forEach((arc, index) => {
+          const value = Number(dataset.data[index] || 0);
+          const ratio = value / total;
+          if (ratio < 0.035) return;
+          const pos = arc.tooltipPosition();
+          const label = chart.data.labels[index];
+          ctx.fillText(`${label}`, pos.x, pos.y - 7);
+          ctx.fillText(`${pctFmt.format(ratio * 100)}%`, pos.x, pos.y + 8);
+        });
+        ctx.restore();
+      }
+    };
+    const defaultTp = () => ([
+      { id: uid(), targetPct: 30, exitPct: 30, base: "momentum" },
+      { id: uid(), targetPct: 50, exitPct: 50, base: "momentum" },
+      { id: uid(), targetPct: 80, exitPct: 50, base: "momentum" },
+      { id: uid(), targetPct: 100, exitPct: 80, base: "momentum" },
+      { id: uid(), targetPct: 150, exitPct: 100, base: "total" }
+    ]);
+    const currentMonth = () => {
+      const now = new Date();
+      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    };
+    const monthList = (startMonth = "2025-01", endMonth = currentMonth()) => {
+      const out = [];
+      const [startYear, startMonthNumber] = String(startMonth || "2025-01").split("-").map(Number);
+      const [endYear, endMonthNumber] = String(endMonth || currentMonth()).split("-").map(Number);
+      const start = new Date(startYear, startMonthNumber - 1, 1);
+      const end = new Date(endYear, endMonthNumber - 1, 1);
+      for (let d = new Date(start); d <= end; d.setMonth(d.getMonth() + 1)) {
+        out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+      }
+      return out;
+    };
+    const seedEquity = (startMonth = "2025-01") => monthList(startMonth).map(month => ({ month, value: 0 }));
+    const sortEquity = () => state.equity.sort((a,b) => a.month.localeCompare(b.month));
+    const rebuildEquityFromStart = (startMonth) => {
+      const existing = new Map((state.equity || []).map(r => [r.month, r.value]));
+      state.equity = monthList(startMonth).map(month => ({ month, value: Number(existing.get(month) || 0) }));
+      sortEquity();
+    };
+    const firstTradeMonth = () => {
+      const dates = (state.trades || []).map(t => t.date).filter(Boolean).sort();
+      return dates.length ? dates[0].slice(0, 7) : currentMonth();
+    };
+    const lastDataMonth = () => {
+      const tradeMonths = (state.trades || []).map(t => String(t.date || "").slice(0, 7)).filter(Boolean);
+      const depositMonths = (state.deposits || []).map(d => String(d.date || "").slice(0, 7)).filter(Boolean);
+      const latest = [...tradeMonths, ...depositMonths].sort().pop();
+      const nowMonth = currentMonth();
+      if (!latest) return nowMonth;
+      return latest > nowMonth ? latest : nowMonth;
+    };
+    const initialState = () => ({
+      settings: { capital: 100000, cash: 25000, fx: 32.25, bilRate: 3.49, cashYieldSymbols: "BIL,SGOV", yieldRates: { ...yieldSnapshots }, equityStartMonth: "", equityYearFilter: "ALL" },
+      trades: [],
+      nextTradeOrder: 1,
+      deposits: [],
+      symbols: {},
+      equity: seedEquity("2025-01")
+    });
+    let state = load();
+    let allocationChart, equityChart;
+    let lastAmountEdited = false;
+    let lastTradingViewSymbols = "";
+    let lastQuoteFetchSymbols = "";
+    let deferredRenderTimer = null;
+    let isEditingTableField = false;
+    let pendingRenderAfterEdit = false;
+    let dataFileHandle = null;
+
+    function hydrateState(saved) {
+      saved ||= initialState();
+      saved.equity ||= seedEquity();
+      saved.settings ||= initialState().settings;
+      saved.settings.cashYieldSymbols ||= "BIL,SGOV";
+      saved.settings.equityYearFilter ||= "ALL";
+      saved.settings.yieldRates ||= {};
+      saved.trades ||= [];
+      saved.settings.equityStartMonth ||= (saved.trades.map(t => t.date).filter(Boolean).sort()[0] || "").slice(0, 7);
+      for (const [symbol, snapshot] of Object.entries(yieldSnapshots)) {
+        if (!saved.settings.yieldRates[symbol]) saved.settings.yieldRates[symbol] = snapshot;
+      }
+      saved.trades = saved.trades.map((t, idx) => ({ ...t, order: Number.isFinite(Number(t.order)) ? Number(t.order) : idx + 1 }));
+      saved.nextTradeOrder ||= (saved.trades.reduce((m, t) => Math.max(m, Number(t.order || 0)), 0) + 1);
+      saved.deposits ||= [];
+      saved.symbols ||= {};
+      const maxMonth = (() => {
+        const tradeMonths = saved.trades.map(t => String(t.date || "").slice(0, 7)).filter(Boolean);
+        const depositMonths = saved.deposits.map(d => String(d.date || "").slice(0, 7)).filter(Boolean);
+        const latest = [...tradeMonths, ...depositMonths].sort().pop();
+        const nowMonth = currentMonth();
+        if (!latest) return nowMonth;
+        return latest > nowMonth ? latest : nowMonth;
+      })();
+      for (const m of monthList(saved.settings.equityStartMonth || firstTradeMonth(), maxMonth)) {
+        if (!saved.equity.some(r => r.month === m)) saved.equity.push({ month: m, value: 0 });
+      }
+      saved.equity.sort((a,b) => a.month.localeCompare(b.month));
+      return saved;
+    }
+    function load() {
+      try {
+        let raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) {
+          for (const key of LEGACY_STORAGE_KEYS) {
+            const legacy = localStorage.getItem(key);
+            if (!legacy) continue;
+            raw = legacy;
+            localStorage.setItem(STORAGE_KEY, legacy);
+            break;
+          }
+        }
+        let saved = null;
+        if (raw) {
+          try { saved = JSON.parse(raw); } catch { saved = null; }
+        }
+        if (!saved) {
+          const backupRaw = localStorage.getItem(STORAGE_BACKUP_KEY);
+          if (backupRaw) {
+            try {
+              saved = JSON.parse(backupRaw);
+              localStorage.setItem(STORAGE_KEY, backupRaw);
+            } catch { saved = null; }
+          }
+        }
+        return hydrateState(saved);
+      } catch { return initialState(); }
+    }
+    function save() {
+      const payload = JSON.stringify(state);
+      localStorage.setItem(STORAGE_KEY, payload);
+      localStorage.setItem(STORAGE_BACKUP_KEY, payload);
+    }
+    async function writeStateToDataFile(silent = true) {
+      if (!dataFileHandle) return false;
+      try {
+        const writable = await dataFileHandle.createWritable();
+        await writable.write(JSON.stringify(state, null, 2));
+        await writable.close();
+        return true;
+      } catch (err) {
+        if (!silent) alert(`寫入資料檔失敗：${String(err?.message || err)}`);
+        return false;
+      }
+    }
+    async function pickDataFile() {
+      if (!("showOpenFilePicker" in window)) {
+        alert("此瀏覽器不支援手動選檔，請使用最新版 Edge / Chrome。");
+        return;
+      }
+      try {
+        const [handle] = await window.showOpenFilePicker({
+          multiple: false,
+          types: [{ description: "JSON", accept: { "application/json": [".json"] } }]
+        });
+        if (!handle) return;
+        const file = await handle.getFile();
+        const text = await file.text();
+        const parsed = JSON.parse(text);
+        state = hydrateState(parsed);
+        dataFileHandle = handle;
+        render();
+      } catch (err) {
+        if (err?.name === "AbortError") return;
+        alert(`讀取資料檔失敗：${String(err?.message || err)}`);
+      }
+    }
+    async function saveAsDataFile() {
+      if (!("showSaveFilePicker" in window)) {
+        alert("此瀏覽器不支援手動選檔，請使用最新版 Edge / Chrome。");
+        return;
+      }
+      try {
+        const handle = await window.showSaveFilePicker({
+          suggestedName: "美股投資戰情室資料.json",
+          types: [{ description: "JSON", accept: { "application/json": [".json"] } }]
+        });
+        if (!handle) return;
+        dataFileHandle = handle;
+        await writeStateToDataFile(false);
+      } catch (err) {
+        if (err?.name === "AbortError") return;
+        alert(`建立資料檔失敗：${String(err?.message || err)}`);
+      }
+    }
+    function normalizeYieldSymbol(symbol) {
+      const s = String(symbol || "").trim().toUpperCase();
+      return s === "SVOG" ? "SGOV" : s;
+    }
+    function cashYieldSymbols() {
+      return String(state.settings.cashYieldSymbols || "BIL,SGOV")
+        .split(",")
+        .map(normalizeYieldSymbol)
+        .filter(Boolean)
+        .filter((s, i, arr) => arr.indexOf(s) === i);
+    }
+    function ensureSymbol(symbol) {
+      const s = symbol.toUpperCase().trim();
+      if (!state.symbols[s]) {
+        state.symbols[s] = { currentPrice: 0, maxInvest: 0, note: "", high: 0, low: 0, tp: defaultTp() };
+      }
+      state.symbols[s].tp ||= defaultTp();
+      return state.symbols[s];
+    }
+    function calcPositions() {
+      const book = {};
+      const sorted = [...state.trades].sort((a,b) => Number(a.order || 0) - Number(b.order || 0));
+      for (const t of sorted) {
+        const symbol = (t.symbol || "").toUpperCase().trim();
+        if (!symbol) continue;
+        ensureSymbol(symbol);
+        book[symbol] ||= { symbol, shares: 0, cost: 0, realized: 0, buys: 0, sells: 0 };
+        const p = book[symbol];
+        const shares = Number(t.shares || 0);
+        const price = Number(t.price || 0);
+        const amount = shares * price;
+        if (t.side === "SELL") {
+          const avg = p.shares ? p.cost / p.shares : 0;
+          const sellShares = Math.min(shares, Math.max(0, p.shares));
+          p.realized += (price - avg) * sellShares;
+          p.cost -= avg * sellShares;
+          p.shares -= sellShares;
+          p.sells += amount;
+        } else {
+          p.shares += shares;
+          p.cost += amount;
+          p.buys += amount;
+        }
+        if (Math.abs(p.shares) < 0.0000005) { p.shares = 0; p.cost = 0; }
+      }
+      return Object.values(book).filter(p => p.shares > 0)
+        .map(p => {
+          const meta = ensureSymbol(p.symbol);
+          const current = Number(meta.currentPrice || 0);
+          const market = p.shares * current;
+          const unreal = market - p.cost;
+          const avg = p.shares ? p.cost / p.shares : 0;
+          const unrealPct = p.cost ? unreal / p.cost * 100 : 0;
+          const realizedPct = p.buys ? p.realized / p.buys * 100 : 0;
+          return { ...p, avg, current, market, unreal, unrealPct, realizedPct, core: p.shares * .2, momentum: p.shares * .8, meta };
+        });
+    }
+    function calcMetrics(positions) {
+      const baseCapital = Number(state.settings.capital || 0);
+      const deposits = (state.deposits || []).reduce((a,d) => a + Number(d.amount || 0), 0);
+      const invested = baseCapital + deposits;
+      const buyAmount = state.trades.filter(t => t.side !== "SELL").reduce((a,t) => a + Number(t.price || 0) * Number(t.shares || 0), 0);
+      const sellAmount = state.trades.filter(t => t.side === "SELL").reduce((a,t) => a + Number(t.price || 0) * Number(t.shares || 0), 0);
+      const cash = invested - buyAmount + sellAmount;
+      const cost = positions.reduce((a,p) => a + p.cost, 0);
+      const market = positions.reduce((a,p) => a + p.market, 0);
+      const unreal = positions.reduce((a,p) => a + p.unreal, 0);
+      const realized = Object.values(calcRealizedBySymbol()).reduce((a,v) => a + Number(v || 0), 0);
+      const equity = cash + market;
+      const totalPnl = realized + unreal;
+      const ret = invested ? totalPnl / invested * 100 : 0;
+      const eq = buildEquitySeries(state.settings.equityStartMonth).filter(r => Number(r.value) > 0);
+      const first = eq[0], last = eq[eq.length - 1];
+      let cagr = 0, mdd = 0;
+      if (first && last && first.value > 0 && last.value > 0) {
+        const months = Math.max(1, (Number(last.month.slice(0,4)) - Number(first.month.slice(0,4))) * 12 + Number(last.month.slice(5,7)) - Number(first.month.slice(5,7)));
+        cagr = (Math.pow(last.value / first.value, 12 / months) - 1) * 100;
+      }
+      let peak = 0;
+      for (const r of eq) {
+        const v = Number(r.value || 0);
+        peak = Math.max(peak, v);
+        if (peak) mdd = Math.min(mdd, (v - peak) / peak * 100);
+      }
+      return { invested, baseCapital, deposits, cash, buyAmount, sellAmount, cost, market, unreal, realized, equity, totalPnl, ret, cagr, mdd };
+    }
+    function calcRealizedBySymbol() {
+      const book = {};
+      const sorted = [...state.trades].sort((a,b) => Number(a.order || 0) - Number(b.order || 0));
+      for (const t of sorted) {
+        const symbol = (t.symbol || "").toUpperCase().trim();
+        if (!symbol) continue;
+        book[symbol] ||= { shares: 0, cost: 0, realized: 0 };
+        const p = book[symbol];
+        const shares = Number(t.shares || 0);
+        const price = Number(t.price || 0);
+        if (t.side === "SELL") {
+          const avg = p.shares ? p.cost / p.shares : 0;
+          const sellShares = Math.min(shares, Math.max(0, p.shares));
+          p.realized += (price - avg) * sellShares;
+          p.cost -= avg * sellShares;
+          p.shares -= sellShares;
+          if (Math.abs(p.shares) < 0.0000005) { p.shares = 0; p.cost = 0; }
+        } else {
+          p.shares += shares;
+          p.cost += shares * price;
+        }
+      }
+      return Object.fromEntries(Object.entries(book).map(([symbol, p]) => [symbol, p.realized]));
+    }
+    function calcRealizedStatsBySymbol() {
+      const book = {};
+      const sorted = [...state.trades].sort((a,b) => Number(a.order || 0) - Number(b.order || 0));
+      for (const t of sorted) {
+        const symbol = (t.symbol || "").toUpperCase().trim();
+        if (!symbol) continue;
+        book[symbol] ||= { shares: 0, cost: 0, realized: 0, buys: 0 };
+        const p = book[symbol];
+        const shares = Number(t.shares || 0);
+        const price = Number(t.price || 0);
+        if (t.side === "SELL") {
+          const avg = p.shares ? p.cost / p.shares : 0;
+          const sellShares = Math.min(shares, Math.max(0, p.shares));
+          p.realized += (price - avg) * sellShares;
+          p.cost -= avg * sellShares;
+          p.shares -= sellShares;
+          if (Math.abs(p.shares) < 0.0000005) { p.shares = 0; p.cost = 0; }
+        } else {
+          p.shares += shares;
+          p.cost += shares * price;
+          p.buys += shares * price;
+        }
+      }
+      return Object.fromEntries(Object.entries(book).map(([symbol, p]) => {
+        const pctValue = p.buys ? (p.realized / p.buys) * 100 : 0;
+        return [symbol, { realized: p.realized, buys: p.buys, pct: pctValue }];
+      }));
+    }
+    function buildEquitySeries(startMonthInput) {
+      const startMonth = startMonthInput || state.settings.equityStartMonth || firstTradeMonth();
+      const months = monthList(startMonth, lastDataMonth());
+      const tradeSorted = [...state.trades].sort((a,b) => Number(a.order || 0) - Number(b.order || 0));
+      const book = {};
+      const monthlyRealizedMap = {};
+      for (const t of tradeSorted) {
+        const symbol = (t.symbol || "").toUpperCase().trim();
+        if (!symbol || !t.date) continue;
+        book[symbol] ||= { shares: 0, cost: 0 };
+        const p = book[symbol];
+        const shares = Number(t.shares || 0);
+        const price = Number(t.price || 0);
+        if (t.side === "SELL") {
+          const avg = p.shares ? p.cost / p.shares : 0;
+          const sellShares = Math.min(shares, Math.max(0, p.shares));
+          const realized = (price - avg) * sellShares;
+          const month = t.date.slice(0, 7);
+          monthlyRealizedMap[month] = Number(monthlyRealizedMap[month] || 0) + realized;
+          p.cost -= avg * sellShares;
+          p.shares -= sellShares;
+          if (Math.abs(p.shares) < 0.0000005) { p.shares = 0; p.cost = 0; }
+        } else {
+          p.shares += shares;
+          p.cost += shares * price;
+        }
+      }
+      const depositByMonth = {};
+      for (const d of (state.deposits || [])) {
+        if (!d.date) continue;
+        const month = d.date.slice(0, 7);
+        depositByMonth[month] = Number(depositByMonth[month] || 0) + Number(d.amount || 0);
+      }
+      const baseCapital = Number(state.settings.capital || 0);
+      let cumRealized = 0;
+      let cumDeposits = 0;
+      const yearlyRealizedMap = {};
+      return months.map(month => {
+        const monthlyRealized = Number(monthlyRealizedMap[month] || 0);
+        const monthlyDeposit = Number(depositByMonth[month] || 0);
+        const year = month.slice(0, 4);
+        yearlyRealizedMap[year] = Number(yearlyRealizedMap[year] || 0) + monthlyRealized;
+        const yearlyRealized = Number(yearlyRealizedMap[year] || 0);
+        cumRealized += monthlyRealized;
+        cumDeposits += monthlyDeposit;
+        const investedBasis = baseCapital + cumDeposits;
+        const monthlyPct = investedBasis ? monthlyRealized / investedBasis * 100 : 0;
+        const yearlyPct = investedBasis ? yearlyRealized / investedBasis * 100 : 0;
+        const cumPct = investedBasis ? cumRealized / investedBasis * 100 : 0;
+        return {
+          month,
+          monthlyRealized,
+          monthlyPct,
+          yearlyRealized,
+          yearlyPct,
+          cumRealized,
+          cumPct,
+          value: baseCapital + cumDeposits + cumRealized
+        };
+      });
+    }
+    function render() {
+      save();
+      writeStateToDataFile(true);
+      if (!state.settings.equityStartMonth) state.settings.equityStartMonth = firstTradeMonth();
+      document.getElementById("capitalInput").value = state.settings.capital;
+      const positions = calcPositions();
+      const metrics = calcMetrics(positions);
+      document.getElementById("cashInput").value = metrics.cash.toFixed(2);
+      document.getElementById("fxInput").value = state.settings.fx;
+      document.getElementById("cashYieldSymbolsInput").value = state.settings.cashYieldSymbols || "BIL,SGOV";
+      document.getElementById("equityStartInput").value = state.settings.equityStartMonth || firstTradeMonth();
+      const equitySeries = buildEquitySeries(state.settings.equityStartMonth);
+      const yearSelect = document.getElementById("equityYearFilter");
+      const years = [...new Set(equitySeries.map(r => r.month.slice(0, 4)))];
+      yearSelect.innerHTML = `<option value="ALL">全部年份</option>${years.map(y => `<option value="${y}">${y} 年</option>`).join("")}`;
+      const selectedYear = String(state.settings.equityYearFilter || "ALL");
+      yearSelect.value = years.includes(selectedYear) || selectedYear === "ALL" ? selectedYear : "ALL";
+      state.settings.equityYearFilter = yearSelect.value;
+      renderKpis(metrics);
+      renderPositions(positions);
+      renderTrades();
+      renderTp(positions);
+      renderEquity(metrics);
+      renderAllocation(metrics, positions);
+      renderBil(metrics);
+      renderTradingView(positions);
+      renderQuoteFallback(positions);
+    }
+    function renderKpis(m) {
+      const items = [
+        ["帳戶資產", money(m.equity), `約 NT$ ${fmt.format(m.equity * Number(state.settings.fx || 0))}`],
+        ["總投入資金", money(m.invested), `入金加總 ${money(m.deposits)}`],
+        ["總計損益", money(m.totalPnl), pct(m.ret), m.totalPnl],
+        ["未實現損益", money(m.unreal), "依目前股價", m.unreal],
+        ["已實現損益", money(m.realized), "賣出交易估算", m.realized],
+        ["剩餘現金", money(m.cash), `買入 ${money(m.buyAmount)} / 賣出 ${money(m.sellAmount)}`, m.cash],
+        ["年化 / MDD", `${pctFmt.format(m.cagr)}%`, `MDD ${pctFmt.format(m.mdd)}%`, m.cagr]
+      ];
+      document.getElementById("kpis").innerHTML = items.map(([label,value,hint,val]) => `
+        <div class="kpi">
+          <div class="label">${label}</div>
+          <div class="value ${Number(val || 0) > 0 ? "good" : Number(val || 0) < 0 ? "bad" : ""}">${value}</div>
+          <div class="hint">${hint}</div>
+        </div>`).join("");
+    }
+    function renderPositions(positions) {
+      const body = document.getElementById("positionsBody");
+      const mobile = document.getElementById("positionMobile");
+      body.innerHTML = positions.map(p => `
+        <tr>
+          <td class="left symbol">${p.symbol}</td>
+          <td>${six(p.shares)}</td>
+          <td>${money(p.avg)}</td>
+          <td><input data-symbol="${p.symbol}" data-field="currentPrice" type="number" step="0.000001" value="${p.meta.currentPrice || ""}"></td>
+          <td>${money(p.cost)}</td>
+          <td>${money(p.market)}</td>
+          <td class="${p.unreal >= 0 ? "good" : "bad"}">${money(p.unreal)} (${pctFmt.format(p.unrealPct)}%)</td>
+          <td class="${p.realized >= 0 ? "good" : "bad"}">${money(p.realized)} (${pctFmt.format(p.realizedPct)}%)</td>
+          <td>${six(p.core)}</td>
+          <td>${six(p.momentum)}</td>
+          <td><input data-symbol="${p.symbol}" data-field="maxInvest" type="number" step="0.01" value="${p.meta.maxInvest || ""}"></td>
+          <td class="left"><textarea data-symbol="${p.symbol}" data-field="note">${p.meta.note || ""}</textarea></td>
+        </tr>`).join("") || `<tr><td colspan="12" class="left muted">尚無持股，先新增一筆交易。</td></tr>`;
+      mobile.innerHTML = positions.map(p => `
+        <div class="position-card">
+          <div class="mini-row"><span class="symbol">${p.symbol}</span><strong>${six(p.shares)} 股</strong></div>
+          <div class="mini-row"><span>市值 / 成本</span><strong>${money(p.market)} / ${money(p.cost)}</strong></div>
+          <div class="mini-row"><span>未實現 / 已實現</span><strong class="${p.unreal >= 0 ? "good" : "bad"}">${money(p.unreal)} (${pctFmt.format(p.unrealPct)}%) / ${money(p.realized)} (${pctFmt.format(p.realizedPct)}%)</strong></div>
+          <div class="mini-row"><span>核心 / 動能</span><strong>${six(p.core)} / ${six(p.momentum)}</strong></div>
+        </div>`).join("") || `<div class="empty">尚無持股</div>`;
+    }
+    function renderTrades() {
+      const realizedBySymbol = calcRealizedStatsBySymbol();
+      const tradeRows = state.trades.map(t => ({ kind: "trade", date: t.date || "", id: t.id, item: t, seq: Number(t.order || 0) }));
+      const depositRows = (state.deposits || []).map((d, i) => ({ kind: "deposit", date: d.date || "", id: d.id, item: d, seq: 1000000000 + i }));
+      const rows = [...tradeRows, ...depositRows].sort((a, b) => {
+        const ad = a.date || "";
+        const bd = b.date || "";
+        if (ad !== bd) return ad.localeCompare(bd);
+        return a.seq - b.seq;
+      });
+      document.getElementById("tradesBody").innerHTML = rows.map(row => {
+        if (row.kind === "deposit") {
+          const d = row.item;
+          return `
+            <tr>
+              <td class="left">${d.date || ""}</td>
+              <td><span class="pill">入金</span></td>
+              <td>DEPOSIT</td>
+              <td></td>
+              <td></td>
+              <td>${money(d.amount || 0)}</td>
+              <td></td>
+              <td class="left"><textarea data-deposit="${d.id}" data-field="note" placeholder="備註">${d.note || ""}</textarea></td>
+              <td><button class="danger" data-delete-deposit="${d.id}">刪除</button></td>
+            </tr>`;
+        }
+        const t = row.item;
+        const symbol = (t.symbol || "").toUpperCase().trim();
+        const realizedStats = realizedBySymbol[symbol] || { realized: 0, pct: 0 };
+        const realized = Number(realizedStats.realized || 0);
+        const realizedPct = Number(realizedStats.pct || 0);
+        return `
+        <tr>
+          <td class="left">${t.date || ""}</td>
+          <td>${t.symbol || ""}</td>
+          <td><span class="pill">${t.side || ""}</span></td>
+          <td>${money(t.price || 0)}</td>
+          <td>${six(t.shares || 0)}</td>
+          <td>${money(Number(t.price || 0) * Number(t.shares || 0))}</td>
+          <td class="${realized >= 0 ? "good" : "bad"}">${money(realized)} (${pctFmt.format(realizedPct)}%)</td>
+          <td class="left"><textarea data-trade="${t.id}" data-field="note" placeholder="備註">${t.note || ""}</textarea></td>
+          <td><button class="danger" data-delete="${t.id}">刪除</button></td>
+        </tr>`;
+      }).join("") || `<tr><td colspan="9" class="left muted">尚無交易紀錄。</td></tr>`;
+    }
+    function renderTp(positions) {
+      document.getElementById("tpBody").innerHTML = positions.map(p => {
+        const pnlPct = p.cost ? (p.market - p.cost) / p.cost * 100 : 0;
+        const priceProgress = p.avg ? Math.max(0, Math.min(100, ((p.current / p.avg - 1) / 1.5) * 100)) : 0;
+        const stages = p.meta.tp.map(tp => {
+        const baseShares = tp.base === "total" ? p.shares : p.momentum;
+        const exitShares = baseShares * Number(tp.exitPct || 0) / 100;
+        const remaining = Math.max(0, p.shares - exitShares);
+        const targetPrice = p.avg * (1 + Number(tp.targetPct || 0) / 100);
+        const bar = Math.max(0, Math.min(100, Number(tp.exitPct || 0)));
+        return `
+          <div class="tp-stage">
+            <div class="tp-stage-top">
+              <div class="tp-stage-title">
+                <span>TP</span>
+                <input class="tp-target-input" data-tp-symbol="${p.symbol}" data-tp-id="${tp.id}" data-field="targetPct" type="number" step="0.000001" value="${tp.targetPct}">
+                <span>%</span>
+              </div>
+              <div class="tp-target-price">目標價 ${money(targetPrice)}</div>
+            </div>
+            <div class="tp-stage-mid">
+              <span>出場</span>
+              <select data-tp-symbol="${p.symbol}" data-tp-id="${tp.id}" data-field="base">
+                <option value="momentum" ${tp.base==="momentum"?"selected":""}>動能</option>
+                <option value="total" ${tp.base==="total"?"selected":""}>全倉</option>
+              </select>
+              <span>%</span>
+              <input class="tp-exit-input" data-tp-symbol="${p.symbol}" data-tp-id="${tp.id}" data-field="exitPct" type="number" step="0.000001" value="${tp.exitPct}">
+            </div>
+            <div class="tp-stage-result">
+              <b>${six(exitShares)} 股</b>
+              約 ${money(exitShares * targetPrice)} ｜ 剩 ${six(remaining)}
+            </div>
+            <div class="tp-bar" style="--bar:${bar}%"><span></span></div>
+          </div>`;
+        }).join("");
+        return `
+          <article class="tp-stock-card">
+            <div class="tp-stock-head">
+              <div class="tp-stock-title">${p.symbol}</div>
+              <div class="tp-return ${pnlPct >= 0 ? "good" : "bad"}">${pct(pnlPct)}</div>
+            </div>
+            <div class="tp-meta">
+              <span>現價：<b>${money(p.current)}</b></span>
+              <span>均成本：<b>${money(p.avg)}</b></span>
+              <span>總股數：<b>${six(p.shares)}</b></span>
+              <span>核心 <b>${six(p.core)}</b> ｜ 動能 <b>${six(p.momentum)}</b></span>
+            </div>
+            <div class="tp-scale">
+              <div class="tp-scale-track"><div class="tp-scale-fill" style="--tp-progress:${priceProgress}%"></div></div>
+              <div class="tp-scale-labels"><span>0%</span><span>50%</span><span>100%</span><span>150%</span></div>
+            </div>
+            ${stages}
+            <button class="tp-reset" type="button" data-reset-tp="${p.symbol}">重設為預設值</button>
+          </article>`;
+      }).join("") || `<div class="empty">新增持股後自動產生 TP Planner。</div>`;
+    }
+    function renderEquity(metrics) {
+      const series = buildEquitySeries(state.settings.equityStartMonth);
+      const selectedYear = String(state.settings.equityYearFilter || "ALL");
+      const visibleSeries = selectedYear === "ALL" ? series : series.filter(r => r.month.startsWith(`${selectedYear}-`));
+      const totalRealized = visibleSeries.reduce((sum, r) => sum + Number(r.monthlyRealized || 0), 0);
+      const totalBase = Number(state.settings.capital || 0) + (state.deposits || []).reduce((sum, d) => sum + Number(d.amount || 0), 0);
+      const totalPct = totalBase ? totalRealized / totalBase * 100 : 0;
+      document.getElementById("equityTotalRealized").innerHTML = `
+        <span class="label">累積總已實現</span>
+        <span class="value ${totalRealized >= 0 ? "good" : "bad"}">${money(totalRealized)} (${pctFmt.format(totalPct)}%)</span>
+      `;
+      const byYear = {};
+      for (const row of visibleSeries) {
+        const year = row.month.slice(0, 4);
+        byYear[year] ||= [];
+        byYear[year].push(row);
+      }
+      const yearBlocks = Object.keys(byYear).sort().map(year => {
+        const rows = byYear[year];
+        const yearTotal = rows.reduce((sum, r) => sum + Number(r.monthlyRealized || 0), 0);
+        const yearPctBase = Number(state.settings.capital || 0) + (state.deposits || [])
+          .filter(d => (d.date || "").slice(0, 4) === year)
+          .reduce((sum, d) => sum + Number(d.amount || 0), 0);
+        const yearTotalPct = yearPctBase ? yearTotal / yearPctBase * 100 : 0;
+        const rowHtml = rows.map(r => `
+          <tr>
+            <td class="left">${r.month}</td>
+            <td class="${r.monthlyRealized >= 0 ? "good" : "bad"}">${money(r.monthlyRealized)} (${pctFmt.format(r.monthlyPct)}%)</td>
+            <td class="${r.yearlyRealized >= 0 ? "good" : "bad"}">${money(r.yearlyRealized)} (${pctFmt.format(r.yearlyPct)}%)</td>
+            <td class="${r.cumRealized >= 0 ? "good" : "bad"}">${money(r.cumRealized)} (${pctFmt.format(r.cumPct)}%)</td>
+            <td>${money(r.value)}</td>
+          </tr>
+        `).join("");
+        const totalHtml = `
+          <tr>
+            <td class="left"><strong>${year} 年總損益</strong></td>
+            <td class="${yearTotal >= 0 ? "good" : "bad"}"><strong>${money(yearTotal)} (${pctFmt.format(yearTotalPct)}%)</strong></td>
+            <td colspan="3"></td>
+          </tr>
+        `;
+        const yearHeaderHtml = `<tr><td class="left" colspan="5"><strong>${year} 年</strong></td></tr>`;
+        return `${yearHeaderHtml}${rowHtml}${totalHtml}`;
+      }).join("");
+      document.getElementById("equityBody").innerHTML = yearBlocks || `<tr><td colspan="5" class="left muted">無資產曲線資料</td></tr>`;
+      if (typeof Chart === "undefined") return;
+      const labels = visibleSeries.map(r => r.month);
+      const data = visibleSeries.map(r => Number(r.value || 0) || null);
+      if (equityChart) equityChart.destroy();
+      equityChart = new Chart(document.getElementById("equityChart"), {
+        type: "line",
+        data: { labels, datasets: [{ label: "帳戶資產", data, borderColor: "#2fd0a5", backgroundColor: "rgba(47,208,165,.16)", fill: true, tension: .32 }] },
+        options: chartOpts()
+      });
+    }
+    function renderAllocation(m, positions) {
+      const rows = [
+        ...positions.filter(p => p.market > 0).map(p => ({ label: p.symbol, value: p.market })),
+        { label: "現金", value: m.cash }
+      ].filter(row => row.value > 0);
+      const total = rows.reduce((sum, row) => sum + row.value, 0);
+      const sortedRows = rows.sort((a, b) => b.value - a.value);
+      document.getElementById("allocationText").innerHTML = `
+        <strong>資產配置明細</strong>
+        <div class="allocation-list">
+          ${sortedRows.map((row, index) => {
+            const ratio = total ? row.value / total * 100 : 0;
+            const color = allocationColors[index % allocationColors.length];
+            return `<div class="allocation-item">
+              <span class="allocation-swatch" style="--swatch:${color}"></span>
+              <span>${row.label} <strong>${pctFmt.format(ratio)}%</strong></span>
+              <strong>${money(row.value)}</strong>
+            </div>`;
+          }).join("") || `<div class="note">尚無資產資料</div>`}
+        </div>`;
+      if (typeof Chart === "undefined") return;
+      if (allocationChart) allocationChart.destroy();
+      allocationChart = new Chart(document.getElementById("allocationChart"), {
+        type: "doughnut",
+        data: {
+          labels: sortedRows.map(row => row.label),
+          datasets: [{
+            data: sortedRows.map(row => row.value),
+            backgroundColor: sortedRows.map((_, index) => allocationColors[index % allocationColors.length]),
+            borderColor: "#101722",
+            borderWidth: 2
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          cutout: "56%",
+          plugins: {
+            legend: { labels: { color: "#e7eefb" } },
+            tooltip: {
+              callbacks: {
+                label(context) {
+                  const value = Number(context.raw || 0);
+                  const ratio = total ? value / total * 100 : 0;
+                  return `${context.label}: ${money(value)} (${pctFmt.format(ratio)}%)`;
+                }
+              }
+            }
+          }
+        },
+        plugins: [allocationLabelsPlugin]
+      });
+    }
+    function renderBil(m) {
+      const symbols = cashYieldSymbols();
+      const rates = state.settings.yieldRates || {};
+      const primaryRate = Number(rates.BIL?.rate ?? state.settings.bilRate ?? 0);
+      const primaryAnnual = m.cash * primaryRate / 100;
+      const updated = Object.values(rates).map(r => r.updatedAt).filter(Boolean).sort().pop();
+      document.getElementById("bilPanel").innerHTML = `
+        <div class="kpi"><div class="label">國債 ETF 年化收益率</div><div class="value warn">${pctFmt.format(primaryRate)}%</div><div class="hint">BIL 估算年收益 ${money(primaryAnnual)}</div></div>
+        <div style="height:12px"></div>
+        <button class="primary" id="refreshYieldBtn" type="button">自動抓取年化率</button>
+        <div class="yield-grid">
+          ${symbols.map(symbol => {
+            const record = rates[symbol] || {};
+            const fallback = symbol === "BIL" ? Number(state.settings.bilRate || 0) : 0;
+            const ratePct = Number(record.rate ?? fallback);
+            const annual = m.cash * ratePct / 100;
+            const monthly = annual / 12;
+            return `
+              <div class="yield-row">
+                <div class="yield-meta">
+                  <span class="yield-symbol">${symbol}</span>
+                  <span class="note">來源：${record.source || (symbol === "BIL" ? "手動備援" : "尚未抓取")} ｜ 更新：${record.updatedAt ? new Date(record.updatedAt).toLocaleString("zh-TW") : "尚未更新"}</span>
+                  <span class="note">月收益 ${money(monthly)} ｜ 年收益 ${money(annual)}</span>
+                </div>
+                <input data-yield-rate="${symbol}" type="number" step="0.0001" value="${ratePct || ""}">
+              </div>`;
+          }).join("")}
+        </div>
+        <p class="note">自動更新優先來源：<a href="${BIL_SOURCE_URL}" target="_blank" rel="noopener">SSGA BIL</a>、<a href="${SGOV_SOURCE_URL}" target="_blank" rel="noopener">iShares SGOV</a>。若官方來源暫時不可用，才回退 Yahoo Finance 與手動備援值。${updated ? `最近更新：${new Date(updated).toLocaleString("zh-TW")}` : ""}</p>`;
+    }
+    function renderTradingView(positions) {
+      const symbols = positions.length ? positions.map(p => [p.symbol, `${p.symbol === "BIL" ? "AMEX" : "NASDAQ"}:${p.symbol}|1D`]) : [["QQQ", "NASDAQ:QQQ|1D"], ["SPY", "AMEX:SPY|1D"], ["BIL", "AMEX:BIL|1D"]];
+      const signature = JSON.stringify(symbols);
+      if (signature === lastTradingViewSymbols && document.querySelector(".tradingview-widget-container iframe")) return;
+      lastTradingViewSymbols = signature;
+      const container = document.querySelector(".tradingview-widget-container");
+      container.innerHTML = `
+        <div class="tradingview-widget-container__widget"></div>
+        <div class="tradingview-widget-copyright"><a href="https://www.tradingview.com/" rel="noopener nofollow" target="_blank">Track all markets on TradingView</a></div>`;
+      const s = document.createElement("script");
+      s.type = "text/javascript";
+      s.src = "https://s3.tradingview.com/external-embedding/embed-widget-symbol-overview.js";
+      s.async = true;
+      s.textContent = JSON.stringify({
+        lineWidth: 2,
+        lineType: 0,
+        chartType: "area",
+        fontColor: "rgb(145, 161, 184)",
+        gridLineColor: "rgba(37, 49, 67, 0.55)",
+        volumeUpColor: "rgba(47, 208, 165, 0.35)",
+        volumeDownColor: "rgba(255, 95, 112, 0.35)",
+        backgroundColor: "#0c121b",
+        widgetFontColor: "#e7eefb",
+        upColor: "#2fd0a5",
+        downColor: "#ff5f70",
+        borderUpColor: "#2fd0a5",
+        borderDownColor: "#ff5f70",
+        wickUpColor: "#2fd0a5",
+        wickDownColor: "#ff5f70",
+        symbols,
+        chartOnly: false,
+        width: "100%",
+        height: 520,
+        locale: "zh_TW",
+        colorTheme: "dark",
+        autosize: true,
+        isTransparent: false,
+        showVolume: true,
+        showMA: true,
+        dateRanges: ["1d|1", "1m|30", "3m|60", "12m|1D", "60m|1W", "all|1M"],
+        hideDateRanges: false,
+        hideMarketStatus: false,
+        hideSymbolLogo: false,
+        scalePosition: "right",
+        scaleMode: "Normal",
+        fontFamily: "Inter, sans-serif",
+        fontSize: "12",
+        headerFontSize: "medium",
+        noTimeScale: false,
+        valuesTracking: "1",
+        changeMode: "price-and-percent"
+      });
+      container.appendChild(s);
+    }
+    function renderQuoteFallback(positions) {
+      const box = document.getElementById("quoteFallback");
+      if (!box) return;
+      const rows = (positions.length ? positions : calcPositions()).filter(p => p.symbol);
+      box.innerHTML = rows.map(p => `
+        <div class="quote-card">
+          <div class="symbol">${p.symbol}</div>
+          <div class="price">${money(p.current || p.avg || 0)}</div>
+          <div class="source">${p.meta.quoteSource || "持股明細現價"}${p.meta.quoteUpdatedAt ? ` ｜ ${new Date(p.meta.quoteUpdatedAt).toLocaleTimeString("zh-TW")}` : ""}</div>
+        </div>`).join("") || `<div class="note">新增持股後顯示備援報價</div>`;
+      refreshFallbackQuotes(rows);
+    }
+    async function refreshFallbackQuotes(positions) {
+      const symbols = positions.map(p => p.symbol).filter(Boolean);
+      const signature = symbols.join(",");
+      if (!symbols.length || signature === lastQuoteFetchSymbols) return;
+      lastQuoteFetchSymbols = signature;
+      try {
+        const response = await fetch(`/api/quotes?symbols=${encodeURIComponent(signature)}`, { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = await response.json();
+        let changed = false;
+        for (const q of payload.quotes || []) {
+          const meta = ensureSymbol(q.symbol);
+          if (Number(q.price) > 0 && Number(meta.currentPrice) !== Number(q.price)) {
+            meta.currentPrice = Number(q.price);
+            meta.quoteSource = q.source || "Yahoo Finance";
+            meta.quoteUpdatedAt = q.updatedAt || new Date().toISOString();
+            changed = true;
+          }
+        }
+        if (changed) render();
+      } catch {}
+    }
+    function chartOpts() {
+      return {
+        responsive: true, maintainAspectRatio: false,
+        scales: { x: { ticks: { color: "#91a1b8", maxRotation: 0 }, grid: { color: "#1c2635" } }, y: { ticks: { color: "#91a1b8" }, grid: { color: "#1c2635" } } },
+        plugins: { legend: { labels: { color: "#e7eefb" } } }
+      };
+    }
+    function setupAllocationAndYieldLayout() {
+      const section = document.querySelector("main > section.grid.layout");
+      if (!section) return;
+      section.innerHTML = `
+        <div class="panel">
+          <div class="panel-head">
+            <h2>TradingView 即時股價</h2>
+            <span class="note">持股代號會同步顯示；現價同步更新到持股明細</span>
+          </div>
+          <div class="tv-box">
+            <div class="tv-fallback">
+              <div>載入 TradingView 中，若被阻擋會使用下方備援報價。</div>
+              <div id="quoteFallback" class="quote-fallback-grid"></div>
+            </div>
+            <div class="tradingview-widget-container">
+              <div class="tradingview-widget-container__widget"></div>
+            </div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>資產配置</h2></div>
+          <div class="panel-body split">
+            <div class="chart-box"><canvas id="allocationChart"></canvas></div>
+            <div>
+              <div class="empty" id="allocationText"></div>
+              <p class="note">持股市值使用你在持股明細輸入的目前股價計算；現金使用帳戶設定。</p>
+            </div>
+          </div>
+          <div class="panel-body subpanel">
+            <h3>國債收益估算</h3>
+            <div id="bilPanel"></div>
+          </div>
+        </div>`;
+    }
+    function updateSettings(e) {
+      const map = { capitalInput: "capital", fxInput: "fx", cashYieldSymbolsInput: "cashYieldSymbols" };
+      state.settings[map[e.target.id]] = e.target.id === "cashYieldSymbolsInput" ? e.target.value : Number(e.target.value || 0);
+      render();
+    }
+    function bindEvents() {
+      ["capitalInput","fxInput","cashYieldSymbolsInput"].forEach(id => document.getElementById(id).addEventListener("change", updateSettings));
+      document.getElementById("tradeDate").valueAsDate = new Date();
+      document.getElementById("depositDate").valueAsDate = new Date();
+      document.getElementById("tradePrice").addEventListener("input", autoTradeCalc);
+      document.getElementById("tradeShares").addEventListener("input", () => { lastAmountEdited = false; autoTradeCalc(); });
+      document.getElementById("tradeAmount").addEventListener("input", () => { lastAmountEdited = true; autoTradeCalc(); });
+      document.getElementById("tradeForm").addEventListener("submit", e => {
+        e.preventDefault();
+        const symbol = document.getElementById("tradeSymbol").value.toUpperCase().trim();
+        if (!symbol) return;
+        const price = Number(document.getElementById("tradePrice").value || 0);
+        const shares = Number(document.getElementById("tradeShares").value || 0);
+        ensureSymbol(symbol);
+        state.trades.push({ id: uid(), order: state.nextTradeOrder++, date: document.getElementById("tradeDate").value, symbol, side: document.getElementById("tradeSide").value, price, shares, note: document.getElementById("tradeNote").value });
+        if (!state.symbols[symbol].currentPrice) state.symbols[symbol].currentPrice = price;
+        e.target.reset();
+        document.getElementById("tradeDate").valueAsDate = new Date();
+        render();
+      });
+      document.getElementById("depositForm").addEventListener("submit", e => {
+        e.preventDefault();
+        const amount = Number(document.getElementById("depositAmount").value || 0);
+        if (!amount) return;
+        state.deposits ||= [];
+        state.deposits.push({
+          id: uid(),
+          date: document.getElementById("depositDate").value,
+          amount,
+          note: document.getElementById("depositNote").value
+        });
+        e.target.reset();
+        document.getElementById("depositDate").valueAsDate = new Date();
+        render();
+      });
+      document.getElementById("addTradeBtn").addEventListener("click", () => document.getElementById("tradeSymbol").focus());
+      document.getElementById("pickDataFileBtn").addEventListener("click", pickDataFile);
+      document.getElementById("saveAsDataFileBtn").addEventListener("click", saveAsDataFile);
+      document.getElementById("saveDataNowBtn").addEventListener("click", async () => {
+        if (!dataFileHandle) {
+          await saveAsDataFile();
+          return;
+        }
+        const ok = await writeStateToDataFile(false);
+        if (ok) alert("資料已儲存到選擇的檔案。");
+      });
+      document.getElementById("applyEquityStartBtn").addEventListener("click", () => {
+        const startMonth = document.getElementById("equityStartInput").value || state.settings.equityStartMonth || firstTradeMonth();
+        state.settings.equityStartMonth = startMonth;
+        render();
+      });
+      document.getElementById("equityYearFilter").addEventListener("change", e => {
+        state.settings.equityYearFilter = e.target.value || "ALL";
+        render();
+      });
+      document.getElementById("sampleBtn").addEventListener("click", loadSample);
+      document.getElementById("exportEquityPngBtn").addEventListener("click", exportEquityPng);
+      document.body.addEventListener("change", tableChange);
+      document.body.addEventListener("focusin", e => {
+        const t = e.target;
+        if (t && (t.dataset.trade || t.dataset.deposit || t.dataset.symbol || t.dataset.tpSymbol || t.dataset.yieldRate)) {
+          isEditingTableField = true;
+        }
+      });
+      document.body.addEventListener("focusout", () => {
+        isEditingTableField = false;
+        if (pendingRenderAfterEdit) {
+          pendingRenderAfterEdit = false;
+          requestDeferredRender(0);
+        }
+      });
+      document.body.addEventListener("click", e => {
+        const id = e.target.dataset.delete;
+        if (id) { state.trades = state.trades.filter(t => t.id !== id); render(); }
+        const depositId = e.target.dataset.deleteDeposit;
+        if (depositId) { state.deposits = (state.deposits || []).filter(d => d.id !== depositId); render(); }
+        const resetSymbol = e.target.dataset.resetTp;
+        if (resetSymbol) {
+          ensureSymbol(resetSymbol).tp = defaultTp();
+          render();
+        }
+        if (e.target.id === "refreshYieldBtn") refreshShortYield(false);
+      });
+    }
+    function autoTradeCalc() {
+      const price = Number(document.getElementById("tradePrice").value || 0);
+      const shares = document.getElementById("tradeShares");
+      const amount = document.getElementById("tradeAmount");
+      if (!price) return;
+      if (lastAmountEdited) shares.value = six(Number(amount.value || 0) / price);
+      else amount.value = (Number(shares.value || 0) * price).toFixed(2);
+    }
+    function requestDeferredRender(delay = 120) {
+      if (deferredRenderTimer) clearTimeout(deferredRenderTimer);
+      deferredRenderTimer = setTimeout(() => {
+        deferredRenderTimer = null;
+        if (isEditingTableField) {
+          pendingRenderAfterEdit = true;
+          return;
+        }
+        render();
+      }, delay);
+    }
+    function tableChange(e) {
+      const el = e.target;
+      if (el.dataset.symbol) {
+        const meta = ensureSymbol(el.dataset.symbol);
+        meta[el.dataset.field] = el.dataset.field === "note" ? el.value : Number(el.value || 0);
+        requestDeferredRender();
+      }
+      if (el.dataset.trade) {
+        const previousFirstTradeMonth = firstTradeMonth();
+        const previousStartMonth = state.settings.equityStartMonth || "";
+        const t = state.trades.find(x => x.id === el.dataset.trade);
+        if (!t) return;
+        if (el.dataset.field === "amount") t.shares = Number(t.price || 0) ? Number(el.value || 0) / Number(t.price || 0) : 0;
+        else if (["price","shares"].includes(el.dataset.field)) t[el.dataset.field] = Number(el.value || 0);
+        else t[el.dataset.field] = el.dataset.field === "symbol" ? el.value.toUpperCase().trim() : el.value;
+        if (t.symbol) ensureSymbol(t.symbol);
+        if (el.dataset.field === "date") {
+          const newFirstTradeMonth = firstTradeMonth();
+          if (!previousStartMonth || previousStartMonth === previousFirstTradeMonth) {
+            state.settings.equityStartMonth = newFirstTradeMonth;
+          }
+        }
+        requestDeferredRender();
+      }
+      if (el.dataset.deposit) {
+        const d = (state.deposits || []).find(x => x.id === el.dataset.deposit);
+        if (!d) return;
+        d[el.dataset.field] = el.dataset.field === "amount" ? Number(el.value || 0) : el.value;
+        requestDeferredRender();
+      }
+      if (el.dataset.tpSymbol) {
+        const tp = ensureSymbol(el.dataset.tpSymbol).tp.find(x => x.id === el.dataset.tpId);
+        if (!tp) return;
+        tp[el.dataset.field] = el.dataset.field === "base" ? el.value : Number(el.value || 0);
+        requestDeferredRender();
+      }
+      if (el.dataset.yieldRate) {
+        state.settings.yieldRates ||= {};
+        const symbol = el.dataset.yieldRate;
+        state.settings.yieldRates[symbol] = {
+          rate: Number(el.value || 0),
+          source: "手動輸入",
+          updatedAt: new Date().toISOString()
+        };
+        if (symbol === "BIL") state.settings.bilRate = Number(el.value || 0);
+        requestDeferredRender();
+      }
+    }
+    async function refreshShortYield(silent = false) {
+      const symbols = cashYieldSymbols();
+      if (!symbols.length) return;
+      const button = document.getElementById("refreshYieldBtn");
+      if (button) { button.disabled = true; button.textContent = "抓取中..."; }
+      try {
+        const local = await fetch(`/api/yields?symbols=${encodeURIComponent(symbols.join(","))}`, { cache: "no-store" }).catch(() => null);
+        if (local?.ok) {
+          const payload = await local.json();
+          if (Array.isArray(payload.yields) && payload.yields.length) {
+            state.settings.yieldRates ||= {};
+            for (const row of payload.yields) {
+              state.settings.yieldRates[row.symbol] = {
+                rate: Number(row.rate),
+                source: row.source || "官方資料",
+                updatedAt: row.updatedAt || new Date().toISOString()
+              };
+              if (row.symbol === "BIL") state.settings.bilRate = Number(row.rate);
+            }
+            render();
+            return;
+          }
+          if (!silent && Array.isArray(payload.errors) && payload.errors.length) {
+            alert(`自動抓取失敗：${payload.errors.map(e => `${e.source}: ${e.message}`).join(" | ")}`);
+          }
+        }
+        const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbols.join(","))}`;
+        const response = await fetch(url, { cache: "no-store" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        const quotes = data?.quoteResponse?.result || [];
+        state.settings.yieldRates ||= {};
+        for (const q of quotes) {
+          const symbol = String(q.symbol || "").toUpperCase();
+          const raw = q.trailingAnnualDividendYield ?? q.dividendYield ?? q.yield;
+          if (!symbol || raw == null || Number.isNaN(Number(raw))) continue;
+          const rate = Number(raw) > 1 ? Number(raw) : Number(raw) * 100;
+          state.settings.yieldRates[symbol] = {
+            rate,
+            source: "Yahoo Finance dividend yield",
+            updatedAt: new Date().toISOString()
+          };
+          if (symbol === "BIL") state.settings.bilRate = rate;
+        }
+        render();
+      } catch (error) {
+        state.settings.yieldRates ||= {};
+        for (const symbol of symbols) {
+          if (!state.settings.yieldRates[symbol] && yieldSnapshots[symbol]) state.settings.yieldRates[symbol] = yieldSnapshots[symbol];
+        }
+        render();
+        if (!silent) alert(`自動抓取年化率失敗：${String(error?.message || error)}，已保留目前手動備援值。`);
+      } finally {
+        if (button) { button.disabled = false; button.textContent = "自動抓取年化率"; }
+      }
+    }
+    async function exportEquityPng() {
+      const area = document.getElementById("equityExportArea");
+      if (!area) return;
+      if (typeof html2canvas === "undefined") {
+        alert("PNG 匯出模組尚未載入，請稍後再試。");
+        return;
+      }
+      const btn = document.getElementById("exportEquityPngBtn");
+      const oldText = btn ? btn.textContent : "";
+      if (btn) { btn.disabled = true; btn.textContent = "匯出中..."; }
+      try {
+        const dateTag = new Date().toISOString().slice(0, 10);
+        const fileName = `資產曲線_${dateTag}.png`;
+        let fileHandle = null;
+        if ("showSaveFilePicker" in window) {
+          try {
+            fileHandle = await window.showSaveFilePicker({
+              suggestedName: fileName,
+              types: [
+                {
+                  description: "PNG Image",
+                  accept: { "image/png": [".png"] }
+                }
+              ]
+            });
+          } catch (pickErr) {
+            if (pickErr && pickErr.name === "AbortError") return;
+            throw pickErr;
+          }
+        }
+        const canvas = await html2canvas(area, {
+          backgroundColor: "#101722",
+          scale: 2,
+          useCORS: true
+        });
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
+        if (!blob) throw new Error("無法產生 PNG 檔案。");
+        if (fileHandle) {
+          const writable = await fileHandle.createWritable();
+          await writable.write(blob);
+          await writable.close();
+          return;
+        }
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = fileName;
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+      } catch (err) {
+        alert(`匯出 PNG 失敗：${String(err?.message || err)}\n\n若你需要手動選路徑，請改用最新版 Edge/Chrome 並以 http://localhost 開啟頁面。`);
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = oldText || "匯出資產曲線PNG"; }
+      }
+    }
+    function exportExcel() {
+      const positions = calcPositions();
+      const positionRows = positions.map(p => ({
+        股票: p.symbol, 股數: p.shares, 均價: p.avg, 現價: p.current, 總成本: p.cost, 市值: p.market,
+        未實現損益: p.unreal, 已實現損益: p.realized, 核心倉: p.core, 動能倉: p.momentum,
+        最大投資額: p.meta.maxInvest, 備註: p.meta.note
+      }));
+      const tpRows = positions.flatMap(p => p.meta.tp.map(tp => ({
+        股票: p.symbol, TP百分比: tp.targetPct, 基準: tp.base, 出場部位百分比: tp.exitPct,
+        預計出場股數: (tp.base === "total" ? p.shares : p.momentum) * tp.exitPct / 100
+      })));
+      if (typeof XLSX === "undefined") return exportFallbackXls(positionRows, tpRows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(positionRows), "持股明細");
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(state.trades), "交易紀錄");
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(state.deposits || []), "入金紀錄");
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(tpRows), "TP Planner");
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(buildEquitySeries(state.settings.equityStartMonth).map(r => ({
+        月份: r.month,
+        月已實現損益: r.monthlyRealized,
+        月已實現損益百分比: r.monthlyPct,
+        年已實現損益: r.yearlyRealized,
+        年已實現損益百分比: r.yearlyPct,
+        累積已實現損益: r.cumRealized,
+        累積已實現損益百分比: r.cumPct,
+        帳戶資產: r.value
+      }))), "資產曲線");
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(Object.entries(state.settings.yieldRates || {}).map(([symbol, r]) => ({ 股票: symbol, 年化收益率: r.rate, 來源: r.source, 更新時間: r.updatedAt }))), "短債ETF利率");
+      XLSX.writeFile(wb, `美股投資戰情室_${new Date().toISOString().slice(0,10)}.xlsx`);
+    }
+    function exportFallbackXls(positionRows, tpRows) {
+      const esc = v => String(v ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+      const table = (title, rows) => {
+        const cols = Object.keys(rows[0] || { 資料: "" });
+        return `<h2>${esc(title)}</h2><table border="1"><tr>${cols.map(c => `<th>${esc(c)}</th>`).join("")}</tr>${rows.map(r => `<tr>${cols.map(c => `<td>${esc(r[c])}</td>`).join("")}</tr>`).join("")}</table>`;
+      };
+      const yieldRows = Object.entries(state.settings.yieldRates || {}).map(([symbol, r]) => ({ 股票: symbol, 年化收益率: r.rate, 來源: r.source, 更新時間: r.updatedAt }));
+      const equityRows = buildEquitySeries(state.settings.equityStartMonth).map(r => ({
+        月份: r.month,
+        月已實現損益: r.monthlyRealized,
+        月已實現損益百分比: r.monthlyPct,
+        年已實現損益: r.yearlyRealized,
+        年已實現損益百分比: r.yearlyPct,
+        累積已實現損益: r.cumRealized,
+        累積已實現損益百分比: r.cumPct,
+        帳戶資產: r.value
+      }));
+      const html = `<html><head><meta charset="utf-8"></head><body>${table("持股明細", positionRows)}${table("交易紀錄", state.trades)}${table("入金紀錄", state.deposits || [])}${table("TP Planner", tpRows)}${table("資產曲線", equityRows)}${table("短債ETF利率", yieldRows)}</body></html>`;
+      const blob = new Blob([html], { type: "application/vnd.ms-excel;charset=utf-8" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `美股投資戰情室_${new Date().toISOString().slice(0,10)}.xls`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }
+    function loadSample() {
+      state = initialState();
+      state.trades = [
+        { id: uid(), date: "2025-01-15", symbol: "NVDA", side: "BUY", price: 108.5, shares: 50, note: "AI 動能首批" },
+        { id: uid(), date: "2025-03-10", symbol: "NVDA", side: "BUY", price: 121.2, shares: 30, note: "突破加碼" },
+        { id: uid(), date: "2025-02-06", symbol: "MSFT", side: "BUY", price: 410.25, shares: 15, note: "核心 SaaS" },
+        { id: uid(), date: "2025-04-18", symbol: "TSLA", side: "BUY", price: 156.75, shares: 20, note: "動能倉觀察" }
+      ];
+      state.deposits = [
+        { id: uid(), date: "2025-06-01", amount: 10000, note: "範例追加入金" }
+      ];
+      state.symbols = {
+        NVDA: { currentPrice: 135.8, maxInvest: 18000, note: "核心 + 動能", high: 153, low: 118, tp: defaultTp() },
+        MSFT: { currentPrice: 445.3, maxInvest: 12000, note: "長線核心", high: 468, low: 398, tp: defaultTp() },
+        TSLA: { currentPrice: 182.4, maxInvest: 8000, note: "波動控倉", high: 210, low: 142, tp: defaultTp() }
+      };
+      state.settings.yieldRates = {
+        BIL: { rate: state.settings.bilRate, source: "手動備援", updatedAt: new Date().toISOString() },
+        SGOV: { rate: 0, source: "尚未抓取", updatedAt: "" }
+      };
+      state.equity = seedEquity().map((r, i) => ({ month: r.month, value: i < 12 ? 100000 + i * 1850 - (i === 4 ? 4200 : 0) : 0 }));
+      render();
+    }
+    setupAllocationAndYieldLayout();
+    bindEvents();
+    render();
+    refreshShortYield(true);
+    setInterval(() => {
+      const rows = calcPositions();
+      if (!rows.length) return;
+      refreshFallbackQuotes(rows);
+    }, 30000);
+  </script>
+</body>
+</html>
