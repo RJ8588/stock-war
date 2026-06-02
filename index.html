@@ -759,6 +759,7 @@
     let isEditingTableField = false;
     let pendingRenderAfterEdit = false;
     let dataFileHandle = null;
+    const canUseTradingView = location.protocol === "http:" || location.protocol === "https:";
 
     function hydrateState(saved) {
       saved ||= initialState();
@@ -1385,6 +1386,7 @@
         <p class="note">自動更新優先來源：<a href="${BIL_SOURCE_URL}" target="_blank" rel="noopener">SSGA BIL</a>、<a href="${SGOV_SOURCE_URL}" target="_blank" rel="noopener">iShares SGOV</a>。若官方來源暫時不可用，才回退 Yahoo Finance 與手動備援值。${updated ? `最近更新：${new Date(updated).toLocaleString("zh-TW")}` : ""}</p>`;
     }
     function renderTradingView(positions) {
+      if (!canUseTradingView) return;
       const symbols = positions.length ? positions.map(p => [p.symbol, `${p.symbol === "BIL" ? "AMEX" : "NASDAQ"}:${p.symbol}|1D`]) : [["QQQ", "NASDAQ:QQQ|1D"], ["SPY", "AMEX:SPY|1D"], ["BIL", "AMEX:BIL|1D"]];
       const signature = JSON.stringify(symbols);
       if (signature === lastTradingViewSymbols && document.querySelector(".tradingview-widget-container iframe")) return;
