@@ -203,6 +203,8 @@
       font-weight: 900;
       text-align: right;
     }
+    .tp-return.good { color: var(--good); }
+    .tp-return.bad { color: var(--bad); }
     .tp-meta {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -516,10 +518,6 @@
           <div class="subtitle">TradingView 報價、持股損益、TP Exit Planner、資產曲線與 Excel 匯出</div>
         </div>
         <div class="actions">
-          <button class="primary" id="addTradeBtn">新增交易</button>
-          <button id="pickDataFileBtn">選擇資料檔</button>
-          <button id="saveAsDataFileBtn">另存資料檔</button>
-          <button id="saveDataNowBtn">立即儲存</button>
           <button id="sampleBtn">載入範例</button>
         </div>
       </div>
@@ -651,11 +649,11 @@
               </select>
             </label>
             <button id="applyEquityStartBtn" type="button">套用起始月份</button>
-            <button id="exportEquityPngBtn" type="button">匯出資產曲線PNG</button>
             <div id="equityTotalRealized" class="equity-total-realized">
               <span class="label">累積總已實現</span>
               <span class="value">$0.00 (0.00%)</span>
             </div>
+            <button id="exportEquityPngBtn" type="button">匯出資產曲線</button>
           </div>
           <div class="grid layout-vertical">
             <div class="chart-box"><canvas id="equityChart"></canvas></div>
@@ -793,7 +791,7 @@
       symbols: {},
       equity: seedEquity("2025-01")
     });
-    let state = load();
+    let state = initialState();
     let allocationChart, equityChart;
     let lastAmountEdited = false;
     let lastTradingViewSymbols = "";
@@ -806,6 +804,11 @@
     let pendingRenderAfterEdit = false;
     let dataFileHandle = null;
     const canUseTradingView = location.protocol === "http:" || location.protocol === "https:";
+    const canUseServerState = location.protocol === "http:" || location.protocol === "https:";
+    let serverStateSaveTimer = null;
+    let serverStateSaveInFlight = false;
+    let serverStateSaveQueued = false;
+    let pendingServerStatePayload = "";
 
     function hydrateState(saved) {
       saved ||= initialState();
@@ -869,6 +872,51 @@
       const payload = JSON.stringify(state);
       localStorage.setItem(STORAGE_KEY, payload);
       localStorage.setItem(STORAGE_BACKUP_KEY, payload);
+      if (canUseServerState) queueServerStateSave(payload);
+    }
+    function queueServerStateSave(payload) {
+      if (!canUseServerState) return;
+      pendingServerStatePayload = payload || JSON.stringify(state);
+      if (serverStateSaveTimer) clearTimeout(serverStateSaveTimer);
+      serverStateSaveTimer = setTimeout(() => {
+        void flushServerStateSave();
+      }, 150);
+    }
+    async function flushServerStateSave() {
+      if (!canUseServerState) return;
+      if (serverStateSaveInFlight) {
+        serverStateSaveQueued = true;
+        return;
+      }
+      serverStateSaveInFlight = true;
+      try {
+        const response = await fetch("/api/state", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: pendingServerStatePayload || JSON.stringify(state),
+          cache: "no-store"
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      } catch {
+        /* keep browser state even if server persistence fails */
+      } finally {
+        serverStateSaveInFlight = false;
+        if (serverStateSaveQueued) {
+          serverStateSaveQueued = false;
+          queueServerStateSave(pendingServerStatePayload);
+        }
+      }
+    }
+    async function loadServerState() {
+      if (!canUseServerState) return null;
+      try {
+        const response = await fetch("/api/state", { cache: "no-store" });
+        if (!response.ok) return null;
+        const payload = await response.json();
+        return payload && typeof payload.state === "object" ? payload.state : null;
+      } catch {
+        return null;
+      }
     }
     async function writeStateToDataFile(silent = true) {
       if (!dataFileHandle) return false;
@@ -1611,17 +1659,6 @@
         document.getElementById("depositDate").valueAsDate = new Date();
         render();
       });
-      document.getElementById("addTradeBtn").addEventListener("click", () => document.getElementById("tradeSymbol").focus());
-      document.getElementById("pickDataFileBtn").addEventListener("click", pickDataFile);
-      document.getElementById("saveAsDataFileBtn").addEventListener("click", saveAsDataFile);
-      document.getElementById("saveDataNowBtn").addEventListener("click", async () => {
-        if (!dataFileHandle) {
-          await saveAsDataFile();
-          return;
-        }
-        const ok = await writeStateToDataFile(false);
-        if (ok) alert("資料已儲存到選擇的檔案。");
-      });
       document.getElementById("applyEquityStartBtn").addEventListener("click", () => {
         const startMonth = document.getElementById("equityStartInput").value || state.settings.equityStartMonth || firstTradeMonth();
         state.settings.equityStartMonth = startMonth;
@@ -1834,7 +1871,7 @@
       } catch (err) {
         alert(`匯出 PNG 失敗：${String(err?.message || err)}\n\n若你需要手動選路徑，請改用最新版 Edge/Chrome 並以 http://localhost 開啟頁面。`);
       } finally {
-        if (btn) { btn.disabled = false; btn.textContent = oldText || "匯出資產曲線PNG"; }
+        if (btn) { btn.disabled = false; btn.textContent = oldText || "匯出資產曲線"; }
       }
     }
     function exportExcel() {
@@ -1915,11 +1952,21 @@
       state.equity = seedEquity().map((r, i) => ({ month: r.month, value: i < 12 ? 100000 + i * 1850 - (i === 4 ? 4200 : 0) : 0 }));
       render();
     }
-    setupAllocationAndYieldLayout();
-    bindEvents();
-    render();
-    ensureTradingViewQuotePolling();
-    refreshShortYield(true);
+    async function bootstrap() {
+      const remoteState = await loadServerState();
+      if (remoteState) {
+        state = hydrateState(remoteState);
+      } else {
+        state = load();
+      }
+      setupAllocationAndYieldLayout();
+      bindEvents();
+      render();
+      ensureTradingViewQuotePolling();
+      refreshShortYield(true);
+      if (canUseServerState) queueServerStateSave(JSON.stringify(state));
+    }
+    bootstrap();
   </script>
 </body>
 </html>

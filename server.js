@@ -4,6 +4,7 @@ const path = require("path");
 
 const root = __dirname;
 const port = Number(process.env.PORT || 4173);
+const stateFile = path.join(root, ".data", "dashboard-state.json");
 
 const snapshots = {
   BIL: {
@@ -27,6 +28,30 @@ const normalize = symbol => {
 
 function escapeRegExp(value) {
   return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+async function readJsonFile(filePath) {
+  try {
+    const text = await fs.readFile(filePath, "utf8");
+    return JSON.parse(text);
+  } catch (err) {
+    if (err && err.code === "ENOENT") return null;
+    throw err;
+  }
+}
+
+async function writeJsonFile(filePath, value) {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, JSON.stringify(value, null, 2), "utf8");
+}
+
+async function readRequestBody(req) {
+  return await new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on("data", chunk => chunks.push(chunk));
+    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    req.on("error", reject);
+  });
 }
 
 async function textFrom(url) {
@@ -209,6 +234,22 @@ function send(res, status, body, contentType = "text/plain; charset=utf-8") {
 http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://127.0.0.1:${port}`);
+    if (url.pathname === "/api/state") {
+      if (req.method === "GET") {
+        const state = await readJsonFile(stateFile);
+        send(res, 200, JSON.stringify({ state }), "application/json; charset=utf-8");
+        return;
+      }
+      if (req.method === "POST") {
+        const body = await readRequestBody(req);
+        const parsed = JSON.parse(body || "{}");
+        await writeJsonFile(stateFile, parsed);
+        send(res, 200, JSON.stringify({ ok: true }), "application/json; charset=utf-8");
+        return;
+      }
+      send(res, 405, "method not allowed");
+      return;
+    }
     if (url.pathname === "/api/yields") {
       const symbols = String(url.searchParams.get("symbols") || "BIL,SGOV").split(",");
       const payload = await yieldResponse(symbols);
