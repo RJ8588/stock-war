@@ -555,7 +555,7 @@
             <div class="chart-box"><canvas id="allocationChart"></canvas></div>
             <div>
               <div class="empty" id="allocationText"></div>
-              <p class="note">持股市值使用你在持股明細輸入的目前股價計算；現金使用帳戶設定。</p>
+              <p class="note">持股金額使用你在持股明細的總成本計算；現金使用帳戶設定。</p>
             </div>
           </div>
           <div class="panel-body subpanel">
@@ -1400,7 +1400,7 @@
     }
     function renderAllocation(m, positions) {
       const rows = [
-        ...positions.filter(p => p.market > 0).map(p => ({ label: p.symbol, value: p.market })),
+        ...positions.filter(p => p.cost > 0).map(p => ({ label: p.symbol, value: p.cost })),
         { label: "現金", value: m.cash }
       ].filter(row => row.value > 0);
       const total = rows.reduce((sum, row) => sum + row.value, 0);
@@ -1612,7 +1612,7 @@
             <div class="chart-box"><canvas id="allocationChart"></canvas></div>
             <div>
               <div class="empty" id="allocationText"></div>
-              <p class="note">持股市值使用你在持股明細輸入的目前股價計算；現金使用帳戶設定。</p>
+              <p class="note">持股金額使用你在持股明細的總成本計算；現金使用帳戶設定。</p>
             </div>
           </div>
           <div class="panel-body subpanel">
