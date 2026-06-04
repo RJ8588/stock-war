@@ -601,7 +601,7 @@
             <table>
               <thead>
                 <tr>
-                  <th class="left">股票</th><th>股數</th><th>均價</th><th>現價</th><th>總成本</th><th>市值</th><th>未實現損益</th><th>已實現損益</th><th>核心 20%</th><th>動能 80%</th><th>最大投資額</th><th class="left">備註</th>
+                  <th class="left">股票</th><th>股數</th><th>均價</th><th>現價</th><th>總成本</th><th>市值</th><th>未實現損益</th><th>已實現損益</th><th>核心 20%</th><th>動能 80%</th><th>最大投資額</th><th>剩餘投資額</th><th class="left">備註</th>
                 </tr>
               </thead>
               <tbody id="positionsBody"></tbody>
@@ -1230,14 +1230,16 @@
           <td>${six(p.core)}</td>
           <td>${six(p.momentum)}</td>
           <td><input data-symbol="${p.symbol}" data-field="maxInvest" type="number" step="0.01" value="${p.meta.maxInvest || ""}"></td>
+          <td>${money(Number(p.meta.maxInvest || 0) - Number(p.cost || 0))}</td>
           <td class="left"><textarea data-symbol="${p.symbol}" data-field="note">${p.meta.note || ""}</textarea></td>
-        </tr>`).join("") || `<tr><td colspan="12" class="left muted">尚無持股，先新增一筆交易。</td></tr>`;
+        </tr>`).join("") || `<tr><td colspan="13" class="left muted">尚無持股，先新增一筆交易。</td></tr>`;
       mobile.innerHTML = positions.map(p => `
         <div class="position-card">
           <div class="mini-row"><span class="symbol">${p.symbol}</span><strong>${six(p.shares)} 股</strong></div>
           <div class="mini-row"><span>市值 / 成本</span><strong>${money(p.market)} / ${money(p.cost)}</strong></div>
           <div class="mini-row"><span>未實現 / 已實現</span><strong class="${p.unreal >= 0 ? "good" : "bad"}">${money(p.unreal)} (${pctFmt.format(p.unrealPct)}%) / ${money(p.realized)} (${pctFmt.format(p.realizedPct)}%)</strong></div>
           <div class="mini-row"><span>核心 / 動能</span><strong>${six(p.core)} / ${six(p.momentum)}</strong></div>
+          <div class="mini-row"><span>最大 / 剩餘投資額</span><strong>${money(Number(p.meta.maxInvest || 0))} / ${money(Number(p.meta.maxInvest || 0) - Number(p.cost || 0))}</strong></div>
         </div>`).join("") || `<div class="empty">尚無持股</div>`;
     }
     function renderTrades() {
