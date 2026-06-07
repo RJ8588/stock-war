@@ -5,6 +5,11 @@ const path = require("path");
 const root = __dirname;
 const port = Number(process.env.PORT || 4173);
 const stateFile = path.join(root, ".data", "dashboard-state.json");
+const fngCacheFile = path.join(root, ".data", "cnn-fng-cache.json");
+let fearGreedMemoryCache = null;
+let fearGreedMemoryCachedAt = 0;
+let fearGreedInFlight = null;
+const fearGreedCacheTtlMs = 45 * 1000;
 
 const snapshots = {
   BIL: {
@@ -226,6 +231,64 @@ async function yieldResponse(symbols) {
   return { yields: rows, errors };
 }
 
+async function fetchFearGreedOfficial() {
+  const res = await fetch("https://production.dataviz.cnn.io/index/fearandgreed/graphdata", {
+    headers: {
+      "accept": "application/json, text/plain, */*",
+      "origin": "https://edition.cnn.com",
+      "referer": "https://edition.cnn.com/markets/fear-and-greed",
+      "user-agent": "Mozilla/5.0"
+    }
+  });
+  if (!res.ok) throw new Error(`CNN ${res.status}`);
+  const json = await res.json();
+  const fg = json?.fear_and_greed || {};
+  const hist = json?.fear_and_greed_historical || {};
+  const payload = {
+    score: Number(fg.score || 0),
+    rating: String(fg.rating || "").replaceAll("_", " "),
+    timestamp: fg.timestamp || "",
+    previousClose: Number(fg.previous_close || 0),
+    previous1Week: Number(fg.previous_1_week || 0),
+    previous1Month: Number(fg.previous_1_month || 0),
+    previous1Year: Number(fg.previous_1_year || 0),
+    history: Array.isArray(hist.data) ? hist.data.slice(-30).map(item => ({
+      x: Number(item.x || 0),
+      y: Number(item.y || 0),
+      rating: String(item.rating || "").replaceAll("_", " ")
+    })) : []
+  };
+  await writeJsonFile(fngCacheFile, payload);
+  return payload;
+}
+
+async function fearGreedResponse(force = false) {
+  const now = Date.now();
+  if (!force && fearGreedMemoryCache && now - fearGreedMemoryCachedAt < fearGreedCacheTtlMs) {
+    return fearGreedMemoryCache;
+  }
+  if (fearGreedInFlight) return fearGreedInFlight;
+  fearGreedInFlight = (async () => {
+    try {
+      const payload = await fetchFearGreedOfficial();
+      fearGreedMemoryCache = payload;
+      fearGreedMemoryCachedAt = Date.now();
+      return payload;
+    } catch (err) {
+      const cached = fearGreedMemoryCache || await readJsonFile(fngCacheFile).catch(() => null);
+      if (cached) {
+        fearGreedMemoryCache = cached;
+        fearGreedMemoryCachedAt = Date.now();
+        return cached;
+      }
+      throw err;
+    } finally {
+      fearGreedInFlight = null;
+    }
+  })();
+  return fearGreedInFlight;
+}
+
 function send(res, status, body, contentType = "text/plain; charset=utf-8") {
   res.writeHead(status, { "content-type": contentType, "cache-control": "no-store" });
   res.end(body);
@@ -253,6 +316,11 @@ http.createServer(async (req, res) => {
     if (url.pathname === "/api/yields") {
       const symbols = String(url.searchParams.get("symbols") || "BIL,SGOV").split(",");
       const payload = await yieldResponse(symbols);
+      send(res, 200, JSON.stringify(payload), "application/json; charset=utf-8");
+      return;
+    }
+    if (url.pathname === "/api/fng") {
+      const payload = await fearGreedResponse(url.searchParams.get("force") === "1");
       send(res, 200, JSON.stringify(payload), "application/json; charset=utf-8");
       return;
     }
