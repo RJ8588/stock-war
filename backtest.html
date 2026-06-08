@@ -1,0 +1,697 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>策略回測系統</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #080b10;
+      --panel: #101722;
+      --line: #253143;
+      --line-soft: #1c2635;
+      --text: #e7eefb;
+      --muted: #91a1b8;
+      --accent: #2fd0a5;
+      --accent-2: #4aa3ff;
+      --bad: #ff5f70;
+      --good: #2fd0a5;
+      --shadow: 0 22px 60px rgba(0,0,0,.35);
+      --radius: 8px;
+      color-scheme: dark;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: radial-gradient(circle at 24% -10%, rgba(47,208,165,.14), transparent 30%),
+                  radial-gradient(circle at 82% 0%, rgba(74,163,255,.12), transparent 28%),
+                  var(--bg);
+      color: var(--text);
+      font-family: Inter, "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
+      letter-spacing: 0;
+    }
+    button, input, select, textarea { font: inherit; }
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      border-bottom: 1px solid var(--line);
+      background: rgba(8, 11, 16, .92);
+      backdrop-filter: blur(18px);
+    }
+    .topbar {
+      max-width: 1480px;
+      margin: 0 auto;
+      padding: 16px;
+      display: flex;
+      gap: 14px;
+      align-items: center;
+      justify-content: space-between;
+    }
+    h1 { margin: 0; font-size: 22px; line-height: 1.15; font-weight: 800; }
+    .subtitle, .note { color: var(--muted); font-size: 12px; line-height: 1.55; }
+    .subtitle { margin-top: 4px; font-size: 13px; }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+    button, .button-link {
+      border: 1px solid var(--line);
+      background: #131c29;
+      color: var(--text);
+      border-radius: var(--radius);
+      min-height: 38px;
+      padding: 8px 12px;
+      cursor: pointer;
+      transition: .15s ease;
+      white-space: nowrap;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    button:hover, .button-link:hover { border-color: var(--accent-2); transform: translateY(-1px); }
+    .primary { background: linear-gradient(135deg, #1ca783, #2177cf); border-color: transparent; color: white; }
+    .danger { color: #ffd8dd; border-color: rgba(255,95,112,.45); }
+    main {
+      max-width: 1480px;
+      margin: 0 auto;
+      padding: 18px 16px 38px;
+      display: grid;
+      gap: 16px;
+    }
+    .panel {
+      background: rgba(16, 23, 34, .94);
+      border: 1px solid var(--line-soft);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .panel-head {
+      padding: 14px 14px 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border-bottom: 1px solid var(--line-soft);
+    }
+    .panel h2 { margin: 0; font-size: 15px; }
+    .panel-body { padding: 14px; }
+    label { display: grid; gap: 6px; color: var(--muted); font-size: 12px; }
+    input, select, textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      background: #0c121b;
+      color: var(--text);
+      border-radius: var(--radius);
+      padding: 9px 10px;
+      min-height: 38px;
+      outline: none;
+    }
+    textarea { min-height: 38px; resize: vertical; }
+    input:focus, select:focus, textarea:focus { border-color: var(--accent-2); }
+    .form-grid, .backtest-settings {
+      display: grid;
+      gap: 10px;
+      align-items: end;
+    }
+    .form-grid { grid-template-columns: repeat(6, minmax(110px, 1fr)); }
+    .form-grid label.wide { grid-column: span 2; }
+    .backtest-settings {
+      grid-template-columns: repeat(3, minmax(120px, 1fr));
+      margin-bottom: 12px;
+    }
+    .backtest-kpis {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(130px, 1fr));
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .backtest-kpi {
+      border: 1px solid var(--line-soft);
+      border-radius: var(--radius);
+      background: #0c121b;
+      padding: 12px;
+      min-height: 78px;
+    }
+    .backtest-kpi .label { color: var(--muted); font-size: 12px; margin-bottom: 7px; }
+    .backtest-kpi .value { font-size: 19px; font-weight: 800; overflow-wrap: anywhere; }
+    .backtest-summary {
+      display: grid;
+      grid-template-columns: 1fr .9fr;
+      gap: 16px;
+      align-items: start;
+      margin: 14px 0;
+    }
+    .backtest-rules {
+      display: grid;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+      padding: 12px;
+      border: 1px solid var(--line-soft);
+      border-radius: var(--radius);
+      background: #0c121b;
+    }
+    .backtest-rules strong { color: var(--text); }
+    .chart-box { height: 310px; min-height: 260px; }
+    .table-wrap { overflow-x: auto; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 1180px;
+      font-size: 13px;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line-soft);
+      padding: 10px 8px;
+      text-align: right;
+      vertical-align: middle;
+      white-space: nowrap;
+    }
+    th:first-child, td:first-child, th.left, td.left { text-align: left; }
+    th { color: var(--muted); font-weight: 700; background: rgba(12,18,27,.8); position: sticky; top: 0; }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      color: var(--muted);
+      background: #0c121b;
+      font-size: 12px;
+    }
+    .good { color: var(--good); }
+    .bad { color: var(--bad); }
+    .muted { color: var(--muted); }
+    .empty { color: var(--muted); padding: 20px; text-align: center; border: 1px dashed var(--line); border-radius: var(--radius); }
+    @media (max-width: 1180px) {
+      .backtest-settings, .backtest-kpis, .backtest-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 720px) {
+      .topbar { align-items: flex-start; flex-direction: column; }
+      .actions { width: 100%; justify-content: stretch; }
+      .actions a { flex: 1; }
+      .form-grid { grid-template-columns: 1fr 1fr; }
+      .form-grid label.wide { grid-column: 1 / -1; }
+      .panel-head { align-items: flex-start; flex-direction: column; }
+      .backtest-settings, .backtest-kpis, .backtest-summary { grid-template-columns: 1fr; }
+      h1 { font-size: 19px; }
+    }
+    @media (max-width: 480px) {
+      main { padding: 12px 10px 28px; }
+      .form-grid, .backtest-settings, .backtest-kpis, .backtest-summary { grid-template-columns: 1fr; }
+      button { padding: 8px 10px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="topbar">
+        <div>
+          <h1>策略回測系統</h1>
+          <div class="subtitle">固定風險 R 倍數、績效統計與權益曲線</div>
+        </div>
+        <div class="actions">
+          <a class="button-link" href="/">回 Dashboard</a>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="panel">
+        <div class="panel-head">
+          <h2>回測設定與新增紀錄</h2>
+          <span class="note">每筆紀錄會自動保存，並與 Dashboard 共用同一份資料</span>
+        </div>
+        <div class="panel-body">
+          <div class="backtest-settings">
+            <label>回測本金 USD<input id="backtestCapitalInput" type="number" step="0.01"></label>
+            <label>每筆風險 %<input id="backtestRiskPctInput" type="number" step="0.01"></label>
+            <label>每筆風險金額 USD<input id="backtestRiskAmountInput" type="number" step="0.01"></label>
+          </div>
+
+          <form id="backtestForm" class="form-grid">
+            <label>日期<input id="btDate" type="date"></label>
+            <label>商品
+              <select id="btSymbol">
+                <option>MNQ</option>
+                <option>NQ</option>
+                <option>ES</option>
+                <option>MES</option>
+              </select>
+            </label>
+            <label>方向<select id="btDirection"><option>LONG</option><option>SHORT</option></select></label>
+            <label>交易時段
+              <select id="btSession">
+                <option>AS</option>
+                <option>TYO</option>
+                <option>London</option>
+                <option>NYAM</option>
+                <option>NYPM</option>
+              </select>
+            </label>
+            <label>進場價<input id="btEntry" type="number" step="0.000001"></label>
+            <label>停損 pips<input id="btStop" type="number" step="0.01"></label>
+            <label>口數<input id="btContracts" type="number" step="1" min="0"></label>
+            <label>目標 pips<input id="btTarget" type="number" step="0.01"></label>
+            <label>出場 pips<input id="btExit" type="number" step="0.01"></label>
+            <label>來回手續費 USD<input id="btFees" type="number" step="0.01" readonly></label>
+            <label class="wide">備註<textarea id="btNote" placeholder="進場理由、失敗原因、可重複條件..."></textarea></label>
+            <button class="primary" type="submit">加入回測</button>
+          </form>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>回測績效</h2>
+          <span class="note">用停損 pips、出場 pips 與每 pip 價值換算口數、實際 R 與損益</span>
+        </div>
+        <div class="panel-body">
+          <div class="backtest-summary">
+            <div>
+              <div id="backtestKpis" class="backtest-kpis"></div>
+              <div class="chart-box"><canvas id="backtestChart"></canvas></div>
+            </div>
+            <div id="backtestRules" class="backtest-rules"></div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th class="left">日期</th><th>商品</th><th>方向</th><th>交易時段</th><th>進場</th><th>停損pips</th><th>目標pips</th><th>出場pips</th><th>口數</th><th>手續費</th><th>R倍數</th><th>損益</th><th class="left">備註</th><th>操作</th></tr>
+              </thead>
+              <tbody id="backtestBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const STORAGE_KEY = "us-war-room-dashboard-v1";
+    const STORAGE_BACKUP_KEY = "us-war-room-dashboard-v1:backup";
+    const LEGACY_STORAGE_KEYS = [
+      `us-war-room-dashboard-v1:${encodeURIComponent("/")}`,
+      `us-war-room-dashboard-v1:${encodeURIComponent("/index.html")}`
+    ];
+    const fmt = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
+    const pctFmt = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
+    const money = n => "$" + fmt.format(Number(n || 0));
+    const uid = () => Math.random().toString(36).slice(2, 10);
+    const contractRoundTripFees = { MNQ: 0.5, NQ: 5, ES: 5, MES: 0.5 };
+    const contractRoundTripFee = symbol => Number(contractRoundTripFees[String(symbol || "").toUpperCase()] || 0);
+    const contractPipValues = { MNQ: 2, NQ: 20, ES: 50, MES: 5 };
+    const contractPipValue = symbol => Number(contractPipValues[String(symbol || "").toUpperCase()] || 0);
+    const canUseServerState = location.protocol === "http:" || location.protocol === "https:";
+    let backtestChart;
+    let serverStateSaveTimer = null;
+    let serverStateSaveInFlight = false;
+    let serverStateSaveQueued = false;
+    let pendingServerStatePayload = "";
+    let riskInputDriver = "risk";
+
+    const yieldSnapshots = {
+      BIL: { rate: 3.49, source: "State Street(BIL) 30-Day SEC Yield snapshot", updatedAt: "2026-05-20T16:00:00-04:00" },
+      SGOV: { rate: 3.54, source: "iShares(SGOV) 30-Day SEC Yield snapshot", updatedAt: "2026-05-22T16:00:00-04:00" }
+    };
+    const currentMonth = () => new Date().toISOString().slice(0, 7);
+    const monthList = (startMonth = "2025-01", endMonth = currentMonth()) => {
+      const out = [];
+      const start = new Date(`${startMonth}-01T00:00:00`);
+      const end = new Date(`${endMonth}-01T00:00:00`);
+      for (let d = new Date(start); d <= end; d.setMonth(d.getMonth() + 1)) {
+        out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+      }
+      return out;
+    };
+    const seedEquity = (startMonth = "2025-01") => monthList(startMonth).map(month => ({ month, value: 0 }));
+    const initialState = () => ({
+      settings: { capital: 100000, cash: 25000, fx: 32.25, bilRate: 3.49, cashYieldSymbols: "BIL,SGOV", yieldRates: { ...yieldSnapshots }, equityStartMonth: "", equityYearFilter: "ALL" },
+      trades: [],
+      nextTradeOrder: 1,
+      deposits: [],
+      symbols: {},
+      backtestSettings: { capital: 100000, riskPct: 1, riskAmount: 1000, strategyNote: "" },
+      backtests: [],
+      equity: seedEquity("2025-01")
+    });
+    let state = initialState();
+
+    function hydrateState(saved) {
+      saved ||= initialState();
+      saved.settings ||= initialState().settings;
+      saved.settings.cashYieldSymbols ||= "BIL,SGOV";
+      saved.settings.equityYearFilter ||= "ALL";
+      saved.settings.yieldRates ||= {};
+      saved.trades ||= [];
+      saved.nextTradeOrder ||= (saved.trades.reduce((m, t) => Math.max(m, Number(t.order || 0)), 0) + 1);
+      saved.deposits ||= [];
+      saved.symbols ||= {};
+      saved.equity ||= seedEquity();
+      saved.backtestSettings ||= { capital: 100000, riskPct: 1, riskAmount: 1000, strategyNote: "" };
+      saved.backtestSettings.capital = Number(saved.backtestSettings.capital || 100000);
+      saved.backtestSettings.riskPct = Number(saved.backtestSettings.riskPct || 1);
+      saved.backtestSettings.riskAmount = Number(saved.backtestSettings.riskAmount || (saved.backtestSettings.capital * saved.backtestSettings.riskPct / 100));
+      saved.backtestSettings.strategyNote ||= "";
+      saved.backtests ||= [];
+      return saved;
+    }
+    function loadLocalState() {
+      try {
+        let raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) {
+          for (const key of LEGACY_STORAGE_KEYS) {
+            const legacy = localStorage.getItem(key);
+            if (!legacy) continue;
+            raw = legacy;
+            localStorage.setItem(STORAGE_KEY, legacy);
+            break;
+          }
+        }
+        let saved = raw ? JSON.parse(raw) : null;
+        if (!saved) {
+          const backupRaw = localStorage.getItem(STORAGE_BACKUP_KEY);
+          if (backupRaw) saved = JSON.parse(backupRaw);
+        }
+        return hydrateState(saved);
+      } catch {
+        return initialState();
+      }
+    }
+    function save() {
+      const payload = JSON.stringify(state);
+      localStorage.setItem(STORAGE_KEY, payload);
+      localStorage.setItem(STORAGE_BACKUP_KEY, payload);
+      if (canUseServerState) queueServerStateSave(payload);
+    }
+    function queueServerStateSave(payload) {
+      pendingServerStatePayload = payload || JSON.stringify(state);
+      if (serverStateSaveTimer) clearTimeout(serverStateSaveTimer);
+      serverStateSaveTimer = setTimeout(() => void flushServerStateSave(), 150);
+    }
+    async function flushServerStateSave() {
+      if (!canUseServerState) return;
+      if (serverStateSaveInFlight) {
+        serverStateSaveQueued = true;
+        return;
+      }
+      serverStateSaveInFlight = true;
+      try {
+        const response = await fetch("/api/state", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: pendingServerStatePayload || JSON.stringify(state),
+          cache: "no-store"
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      } catch {
+        /* local browser state remains available */
+      } finally {
+        serverStateSaveInFlight = false;
+        if (serverStateSaveQueued) {
+          serverStateSaveQueued = false;
+          queueServerStateSave(pendingServerStatePayload);
+        }
+      }
+    }
+    async function loadServerState() {
+      if (!canUseServerState) return null;
+      try {
+        const response = await fetch("/api/state", { cache: "no-store" });
+        if (!response.ok) return null;
+        const payload = await response.json();
+        return payload && typeof payload.state === "object" ? payload.state : null;
+      } catch {
+        return null;
+      }
+    }
+    function filteredBacktests() {
+      const rows = [...(state.backtests || [])].sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")));
+      return rows;
+    }
+    function calcBacktestRows() {
+      const capital = Number(state.backtestSettings?.capital || 0);
+      const riskDollars = Number(state.backtestSettings?.riskAmount ?? (capital * Number(state.backtestSettings?.riskPct || 0) / 100));
+      let equity = capital;
+      let peak = capital;
+      return filteredBacktests().map((row, index) => {
+        const entry = Number(row.entry || 0);
+        const stopPips = Math.abs(Number(row.stop || 0));
+        const targetPips = Math.abs(Number(row.target || 0));
+        const exitPips = Number(row.exit || 0);
+        const pipValue = contractPipValue(row.symbol);
+        const riskPerContract = stopPips * pipValue;
+        const savedContracts = Math.floor(Number(row.contracts || 0));
+        const rawContracts = riskPerContract > 0
+          ? (savedContracts > 0 ? savedContracts : Math.floor(riskDollars / riskPerContract))
+          : 0;
+        const capitalCapContracts = riskPerContract > 0 ? Math.floor(capital / riskPerContract) : 0;
+        const shares = Math.max(0, Math.min(rawContracts, capitalCapContracts));
+        const effectiveRisk = shares * riskPerContract;
+        const fees = contractRoundTripFee(row.symbol) * shares;
+        const plannedR = stopPips > 0 ? targetPips / stopPips : 0;
+        const gross = exitPips * pipValue * shares;
+        const pnl = gross - fees;
+        const actualR = riskDollars > 0 ? pnl / riskDollars : 0;
+        equity += pnl;
+        peak = Math.max(peak, equity);
+        const drawdown = peak > 0 ? (equity - peak) / peak * 100 : 0;
+        return { ...row, index: index + 1, fees, pipValue, stopPips, targetPips, exitPips, riskDollars, riskPerContract, effectiveRisk, shares, plannedR, actualR, pnl, equity, drawdown };
+      });
+    }
+    function calcBacktestMetrics(rows) {
+      const wins = rows.filter(r => r.pnl > 0);
+      const losses = rows.filter(r => r.pnl < 0);
+      const totalPnl = rows.reduce((sum, r) => sum + Number(r.pnl || 0), 0);
+      const grossProfit = wins.reduce((sum, r) => sum + r.pnl, 0);
+      const grossLoss = Math.abs(losses.reduce((sum, r) => sum + r.pnl, 0));
+      const avgR = rows.length ? rows.reduce((sum, r) => sum + r.actualR, 0) / rows.length : 0;
+      const avgWinR = wins.length ? wins.reduce((sum, r) => sum + r.actualR, 0) / wins.length : 0;
+      const avgLossR = losses.length ? Math.abs(losses.reduce((sum, r) => sum + r.actualR, 0) / losses.length) : 0;
+      const winRate = rows.length ? wins.length / rows.length * 100 : 0;
+      const profitFactor = grossLoss ? grossProfit / grossLoss : grossProfit > 0 ? Infinity : 0;
+      const maxDd = rows.length ? Math.min(...rows.map(r => r.drawdown)) : 0;
+      const capital = Number(state.backtestSettings?.capital || 0);
+      return { count: rows.length, totalPnl, ret: capital ? totalPnl / capital * 100 : 0, winRate, profitFactor, avgR, avgWinR, avgLossR, maxDd };
+    }
+    function chartOpts() {
+      return {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          x: { ticks: { color: "#91a1b8", maxRotation: 0 }, grid: { color: "#1c2635" } },
+          y: { ticks: { color: "#91a1b8" }, grid: { color: "#1c2635" } }
+        },
+        plugins: { legend: { labels: { color: "#e7eefb" } } }
+      };
+    }
+    function currentRiskPerContract() {
+      const symbol = document.getElementById("btSymbol")?.value || "MNQ";
+      const stopPips = Math.abs(Number(document.getElementById("btStop")?.value || 0));
+      return stopPips * contractPipValue(symbol);
+    }
+    function capContracts(contracts, riskPerContract = currentRiskPerContract()) {
+      const capital = Number(state.backtestSettings?.capital || 0);
+      const maxByCapital = riskPerContract > 0 ? Math.floor(capital / riskPerContract) : 0;
+      return Math.max(0, Math.min(Math.floor(Number(contracts || 0)), maxByCapital));
+    }
+    function syncRiskInputsFromAmount() {
+      const capital = Number(state.backtestSettings?.capital || 0);
+      state.backtestSettings.riskPct = capital ? Number(state.backtestSettings.riskAmount || 0) / capital * 100 : 0;
+      const pctInput = document.getElementById("backtestRiskPctInput");
+      if (pctInput && document.activeElement !== pctInput) pctInput.value = state.backtestSettings.riskPct.toFixed(2);
+    }
+    function syncRiskAmountFromPct() {
+      state.backtestSettings.riskAmount = Number(state.backtestSettings.capital || 0) * Number(state.backtestSettings.riskPct || 0) / 100;
+      const amountInput = document.getElementById("backtestRiskAmountInput");
+      if (amountInput && document.activeElement !== amountInput) amountInput.value = state.backtestSettings.riskAmount.toFixed(2);
+    }
+    function syncContractsFromRisk() {
+      const input = document.getElementById("btContracts");
+      if (!input || riskInputDriver === "contracts") return;
+      const riskPerContract = currentRiskPerContract();
+      const contracts = riskPerContract > 0 ? capContracts(Math.floor(Number(state.backtestSettings?.riskAmount || 0) / riskPerContract), riskPerContract) : 0;
+      if (document.activeElement !== input) input.value = contracts ? String(contracts) : "";
+    }
+    function syncRiskFromContracts() {
+      const input = document.getElementById("btContracts");
+      if (!input) return;
+      riskInputDriver = "contracts";
+      const riskPerContract = currentRiskPerContract();
+      const contracts = capContracts(input.value, riskPerContract);
+      if (String(input.value || "") !== String(contracts || "")) input.value = contracts ? String(contracts) : "";
+      state.backtestSettings.riskAmount = contracts * riskPerContract;
+      const amountInput = document.getElementById("backtestRiskAmountInput");
+      if (amountInput) amountInput.value = state.backtestSettings.riskAmount.toFixed(2);
+      syncRiskInputsFromAmount();
+      save();
+    }
+    function render() {
+      save();
+      const settings = state.backtestSettings || {};
+      document.getElementById("backtestCapitalInput").value = settings.capital || 0;
+      document.getElementById("backtestRiskPctInput").value = settings.riskPct || 0;
+      document.getElementById("backtestRiskAmountInput").value = Number(settings.riskAmount || 0).toFixed(2);
+
+      const rows = calcBacktestRows();
+      const m = calcBacktestMetrics(rows);
+      const pf = Number.isFinite(m.profitFactor) ? pctFmt.format(m.profitFactor) : "∞";
+      const items = [
+        ["回測損益", `${money(m.totalPnl)} (${pctFmt.format(m.ret)}%)`, m.totalPnl],
+        ["交易筆數", `${m.count}`, 0],
+        ["勝率", `${pctFmt.format(m.winRate)}%`, m.winRate - 50],
+        ["Profit Factor", pf, m.profitFactor - 1],
+        ["平均 R", m.avgR.toFixed(2), m.avgR],
+        ["最大回撤", `${pctFmt.format(m.maxDd)}%`, m.maxDd]
+      ];
+      document.getElementById("backtestKpis").innerHTML = items.map(([label, value, signal]) => `
+        <div class="backtest-kpi">
+          <div class="label">${label}</div>
+          <div class="value ${Number(signal || 0) > 0 ? "good" : Number(signal || 0) < 0 ? "bad" : ""}">${value}</div>
+        </div>`).join("");
+      document.getElementById("backtestRules").innerHTML = `
+        <strong>回測模型</strong>
+        <span>每筆風險金額 = 回測本金 × 每筆風險%。系統用停損 pips × 每 pip 價值換算整數口數；若停損風險超過本金或風險上限，會自動減少口數。</span>
+        <span>平均勝 R：<strong>${m.avgWinR.toFixed(2)}</strong> ｜ 平均虧 R：<strong>${m.avgLossR.toFixed(2)}</strong> ｜ 期望值：<strong>${m.avgR.toFixed(2)}R / 筆</strong></span>
+        <label>策略筆記<textarea id="backtestStrategyNote" placeholder="盤前想法、進場假設、觀察重點...">${state.backtestSettings.strategyNote || ""}</textarea></label>`;
+      document.getElementById("backtestBody").innerHTML = rows.map(row => `
+        <tr>
+          <td class="left">${row.date || ""}</td>
+          <td>${row.symbol || ""}</td>
+          <td><span class="pill">${row.direction || "LONG"}</span></td>
+          <td>${row.session || ""}</td>
+          <td>${money(row.entry)}</td>
+          <td>${row.stopPips}</td>
+          <td>${row.targetPips}</td>
+          <td class="${row.exitPips >= 0 ? "good" : "bad"}">${row.exitPips}</td>
+          <td>${row.shares}</td>
+          <td>${money(row.fees)}</td>
+          <td class="${row.actualR >= 0 ? "good" : "bad"}">${row.actualR.toFixed(2)}R <span class="muted">/ 計畫 ${row.plannedR.toFixed(2)}R</span></td>
+          <td class="${row.pnl >= 0 ? "good" : "bad"}">${money(row.pnl)}</td>
+          <td class="left"><textarea data-backtest="${row.id}" data-field="note" placeholder="備註">${row.note || ""}</textarea></td>
+          <td><button class="danger" data-delete-backtest="${row.id}">刪除</button></td>
+        </tr>`).join("") || `<tr><td colspan="14" class="left muted">尚無回測紀錄，先新增一筆回測。</td></tr>`;
+      if (typeof Chart === "undefined") return;
+      if (backtestChart) backtestChart.destroy();
+      const labels = ["Start", ...rows.map((row, index) => `${index + 1}. ${row.symbol || ""}`)];
+      const data = [Number(settings.capital || 0), ...rows.map(row => row.equity)];
+      backtestChart = new Chart(document.getElementById("backtestChart"), {
+        type: "line",
+        data: { labels, datasets: [{ label: "回測權益曲線", data, borderColor: "#4aa3ff", backgroundColor: "rgba(74,163,255,.14)", fill: true, tension: .28 }] },
+        options: chartOpts()
+      });
+    }
+    function updateBacktestSettings(e) {
+      const map = {
+        backtestCapitalInput: "capital",
+        backtestRiskPctInput: "riskPct",
+        backtestRiskAmountInput: "riskAmount"
+      };
+      const key = map[e.target.id];
+      if (!key) return;
+      state.backtestSettings ||= {};
+      state.backtestSettings[key] = ["capital", "riskPct", "riskAmount"].includes(key) ? Number(e.target.value || 0) : e.target.value;
+      if (key === "riskPct" || key === "capital") {
+        riskInputDriver = "risk";
+        syncRiskAmountFromPct();
+        syncContractsFromRisk();
+      }
+      if (key === "riskAmount") {
+        riskInputDriver = "risk";
+        syncRiskInputsFromAmount();
+        syncContractsFromRisk();
+      }
+      if (e.type === "input") {
+        save();
+        return;
+      }
+      render();
+    }
+    function bindEvents() {
+      ["backtestCapitalInput","backtestRiskPctInput","backtestRiskAmountInput"].forEach(id => {
+        const el = document.getElementById(id);
+        el.addEventListener("change", updateBacktestSettings);
+        el.addEventListener("input", updateBacktestSettings);
+      });
+      document.getElementById("btDate").valueAsDate = new Date();
+      const refreshFeeInput = () => {
+        document.getElementById("btFees").value = contractRoundTripFee(document.getElementById("btSymbol").value).toFixed(2);
+      };
+      const syncContractsAfterTradeInput = () => {
+        refreshFeeInput();
+        if (riskInputDriver === "contracts") syncRiskFromContracts();
+        else syncContractsFromRisk();
+      };
+      document.getElementById("btSymbol").addEventListener("change", syncContractsAfterTradeInput);
+      document.getElementById("btStop").addEventListener("input", syncContractsAfterTradeInput);
+      document.getElementById("btContracts").addEventListener("input", syncRiskFromContracts);
+      refreshFeeInput();
+      syncContractsFromRisk();
+      document.getElementById("backtestForm").addEventListener("submit", e => {
+        e.preventDefault();
+        const symbol = document.getElementById("btSymbol").value.toUpperCase().trim();
+        const entry = Number(document.getElementById("btEntry").value || 0);
+        const stop = Number(document.getElementById("btStop").value || 0);
+        const exit = Number(document.getElementById("btExit").value || 0);
+        if (!symbol || !entry || !stop || !exit) return;
+        state.backtests ||= [];
+        state.backtests.push({
+          id: uid(),
+          date: document.getElementById("btDate").value,
+          symbol,
+          direction: document.getElementById("btDirection").value,
+          session: document.getElementById("btSession").value,
+          entry,
+          stop,
+          contracts: Number(document.getElementById("btContracts").value || 0),
+          target: Number(document.getElementById("btTarget").value || 0),
+          exit,
+          fees: contractRoundTripFee(symbol),
+          note: document.getElementById("btNote").value
+        });
+        e.target.reset();
+        document.getElementById("btDate").valueAsDate = new Date();
+        document.getElementById("btSymbol").value = "MNQ";
+        refreshFeeInput();
+        syncContractsFromRisk();
+        render();
+      });
+      document.body.addEventListener("change", e => {
+        const el = e.target;
+        if (el.id === "backtestStrategyNote") {
+          state.backtestSettings.strategyNote = el.value;
+          save();
+          return;
+        }
+        if (!el.dataset.backtest) return;
+        const row = (state.backtests || []).find(x => x.id === el.dataset.backtest);
+        if (!row) return;
+        row[el.dataset.field] = el.value;
+        render();
+      });
+      document.body.addEventListener("click", e => {
+        const id = e.target.dataset.deleteBacktest;
+        if (!id) return;
+        state.backtests = (state.backtests || []).filter(row => row.id !== id);
+        render();
+      });
+      document.body.addEventListener("input", e => {
+        const el = e.target;
+        if (el.id !== "backtestStrategyNote") return;
+        state.backtestSettings.strategyNote = el.value;
+        save();
+      });
+    }
+    async function bootstrap() {
+      const remoteState = await loadServerState();
+      state = hydrateState(remoteState || loadLocalState());
+      bindEvents();
+      render();
+    }
+    bootstrap();
+  </script>
+</body>
+</html>

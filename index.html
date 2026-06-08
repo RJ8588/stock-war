@@ -62,7 +62,7 @@
     }
     .subtitle { color: var(--muted); font-size: 13px; margin-top: 4px; }
     .actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
-    button {
+    button, .button-link {
       border: 1px solid var(--line);
       background: #131c29;
       color: var(--text);
@@ -72,8 +72,12 @@
       cursor: pointer;
       transition: .15s ease;
       white-space: nowrap;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
     }
-    button:hover { border-color: var(--accent-2); transform: translateY(-1px); }
+    button:hover, .button-link:hover { border-color: var(--accent-2); transform: translateY(-1px); }
     .primary { background: linear-gradient(135deg, #1ca783, #2177cf); border-color: transparent; color: white; }
     .danger { color: #ffd8dd; border-color: rgba(255,95,112,.45); }
     main {
@@ -533,6 +537,46 @@
       gap: 10px;
       margin-bottom: 12px;
     }
+    .backtest-settings {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(120px, 1fr));
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .backtest-kpis {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(130px, 1fr));
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .backtest-kpi {
+      border: 1px solid var(--line-soft);
+      border-radius: var(--radius);
+      background: #0c121b;
+      padding: 12px;
+      min-height: 78px;
+    }
+    .backtest-kpi .label { color: var(--muted); font-size: 12px; margin-bottom: 7px; }
+    .backtest-kpi .value { font-size: 19px; font-weight: 800; overflow-wrap: anywhere; }
+    .backtest-summary {
+      display: grid;
+      grid-template-columns: 1fr .9fr;
+      gap: 16px;
+      align-items: start;
+      margin-bottom: 14px;
+    }
+    .backtest-rules {
+      display: grid;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+      padding: 12px;
+      border: 1px solid var(--line-soft);
+      border-radius: var(--radius);
+      background: #0c121b;
+    }
+    .backtest-rules strong { color: var(--text); }
     .split { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
     .empty { color: var(--muted); padding: 20px; text-align: center; border: 1px dashed var(--line); border-radius: var(--radius); }
     .mobile-card { display: none; }
@@ -540,6 +584,7 @@
       .kpis { grid-template-columns: repeat(3, 1fr); }
       .layout, .triple, .split { grid-template-columns: 1fr; }
       .settings { grid-template-columns: repeat(2, 1fr); }
+      .backtest-settings, .backtest-kpis, .backtest-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .equity-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .tp-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .fng-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -575,11 +620,12 @@
       .tp-stage-title { grid-template-columns: auto 62px auto; font-size: 16px; }
       .tp-target-input, .tp-exit-input { font-size: 16px; }
       .quote-fallback-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .backtest-settings, .backtest-kpis, .backtest-summary { grid-template-columns: 1fr; }
       h1 { font-size: 19px; }
     }
     @media (max-width: 480px) {
       main { padding: 12px 10px 28px; }
-      .kpis, .form-grid, .settings, .equity-controls { grid-template-columns: 1fr; }
+      .kpis, .form-grid, .settings, .equity-controls, .backtest-settings, .backtest-kpis, .backtest-summary { grid-template-columns: 1fr; }
       .equity-total-realized { justify-self: stretch; }
       .kpi .value { font-size: 20px; }
       button { padding: 8px 10px; }
@@ -597,6 +643,7 @@
           <div class="subtitle">TradingView 報價、持股損益、TP Exit Planner、資產曲線與 Excel 匯出</div>
         </div>
         <div class="actions">
+          <a class="button-link primary" href="/backtest.html">回測系統</a>
           <button id="sampleBtn">載入範例</button>
         </div>
       </div>
@@ -765,6 +812,10 @@
     const money = n => "$" + fmt.format(Number(n || 0));
     const pct = n => (Number(n || 0) >= 0 ? "+" : "") + pctFmt.format(Number(n || 0)) + "%";
     const uid = () => Math.random().toString(36).slice(2, 10);
+    const contractRoundTripFees = { MNQ: 0.5, NQ: 5, ES: 5, MES: 0.5 };
+    const contractRoundTripFee = symbol => Number(contractRoundTripFees[String(symbol || "").toUpperCase()] || 0);
+    const contractPipValues = { MNQ: 2, NQ: 20, ES: 50, MES: 5 };
+    const contractPipValue = symbol => Number(contractPipValues[String(symbol || "").toUpperCase()] || 0);
     const BIL_SOURCE_URL = "https://www.ssga.com/us/en/intermediary/etfs/state-street-spdr-bloomberg-1-3-month-t-bill-etf-bil";
     const SGOV_SOURCE_URL = "https://www.ishares.com/us/products/314116/ishares-0-3-month-treasury-bond-etf";
     const yieldSnapshots = {
@@ -868,10 +919,12 @@
       nextTradeOrder: 1,
       deposits: [],
       symbols: {},
+      backtestSettings: { capital: 100000, riskPct: 1, riskAmount: 1000, strategyNote: "" },
+      backtests: [],
       equity: seedEquity("2025-01")
     });
     let state = initialState();
-    let allocationChart, equityChart;
+    let allocationChart, equityChart, backtestChart;
     let lastAmountEdited = false;
     let lastTradingViewSymbols = "";
     let lastQuoteFetchSymbols = "";
@@ -909,6 +962,12 @@
       saved.nextTradeOrder ||= (saved.trades.reduce((m, t) => Math.max(m, Number(t.order || 0)), 0) + 1);
       saved.deposits ||= [];
       saved.symbols ||= {};
+      saved.backtestSettings ||= { capital: 100000, riskPct: 1, riskAmount: 1000, strategyNote: "" };
+      saved.backtestSettings.capital = Number(saved.backtestSettings.capital || 100000);
+      saved.backtestSettings.riskPct = Number(saved.backtestSettings.riskPct || 1);
+      saved.backtestSettings.riskAmount = Number(saved.backtestSettings.riskAmount || (saved.backtestSettings.capital * saved.backtestSettings.riskPct / 100));
+      saved.backtestSettings.strategyNote ||= "";
+      saved.backtests ||= [];
       const maxMonth = (() => {
         const tradeMonths = saved.trades.map(t => String(t.date || "").slice(0, 7)).filter(Boolean);
         const depositMonths = saved.deposits.map(d => String(d.date || "").slice(0, 7)).filter(Boolean);
@@ -1139,6 +1198,55 @@
       }
       return { invested, baseCapital, deposits, cash, buyAmount, sellAmount, cost, market, unreal, realized, equity, totalPnl, ret, cagr, mdd };
     }
+    function filteredBacktests() {
+      const rows = [...(state.backtests || [])].sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")));
+      return rows;
+    }
+    function calcBacktestRows() {
+      const capital = Number(state.backtestSettings?.capital || 0);
+      const riskDollars = Number(state.backtestSettings?.riskAmount ?? (capital * Number(state.backtestSettings?.riskPct || 0) / 100));
+      let equity = capital;
+      let peak = capital;
+      return filteredBacktests().map((row, index) => {
+        const entry = Number(row.entry || 0);
+        const stopPips = Math.abs(Number(row.stop || 0));
+        const targetPips = Math.abs(Number(row.target || 0));
+        const exitPips = Number(row.exit || 0);
+        const pipValue = contractPipValue(row.symbol);
+        const riskPerContract = stopPips * pipValue;
+        const savedContracts = Math.floor(Number(row.contracts || 0));
+        const rawContracts = riskPerContract > 0
+          ? (savedContracts > 0 ? savedContracts : Math.floor(riskDollars / riskPerContract))
+          : 0;
+        const capitalCapContracts = riskPerContract > 0 ? Math.floor(capital / riskPerContract) : 0;
+        const shares = Math.max(0, Math.min(rawContracts, capitalCapContracts));
+        const effectiveRisk = shares * riskPerContract;
+        const fees = contractRoundTripFee(row.symbol) * shares;
+        const plannedR = stopPips > 0 ? targetPips / stopPips : 0;
+        const gross = exitPips * pipValue * shares;
+        const pnl = gross - fees;
+        const actualR = riskDollars > 0 ? pnl / riskDollars : 0;
+        equity += pnl;
+        peak = Math.max(peak, equity);
+        const drawdown = peak > 0 ? (equity - peak) / peak * 100 : 0;
+        return { ...row, index: index + 1, fees, pipValue, stopPips, targetPips, exitPips, riskDollars, riskPerContract, effectiveRisk, shares, plannedR, actualR, pnl, equity, drawdown };
+      });
+    }
+    function calcBacktestMetrics(rows) {
+      const wins = rows.filter(r => r.pnl > 0);
+      const losses = rows.filter(r => r.pnl < 0);
+      const totalPnl = rows.reduce((sum, r) => sum + Number(r.pnl || 0), 0);
+      const grossProfit = wins.reduce((sum, r) => sum + r.pnl, 0);
+      const grossLoss = Math.abs(losses.reduce((sum, r) => sum + r.pnl, 0));
+      const avgR = rows.length ? rows.reduce((sum, r) => sum + r.actualR, 0) / rows.length : 0;
+      const avgWinR = wins.length ? wins.reduce((sum, r) => sum + r.actualR, 0) / wins.length : 0;
+      const avgLossR = losses.length ? Math.abs(losses.reduce((sum, r) => sum + r.actualR, 0) / losses.length) : 0;
+      const winRate = rows.length ? wins.length / rows.length * 100 : 0;
+      const profitFactor = grossLoss ? grossProfit / grossLoss : grossProfit > 0 ? Infinity : 0;
+      const maxDd = rows.length ? Math.min(...rows.map(r => r.drawdown)) : 0;
+      const capital = Number(state.backtestSettings?.capital || 0);
+      return { count: rows.length, totalPnl, ret: capital ? totalPnl / capital * 100 : 0, winRate, profitFactor, avgR, avgWinR, avgLossR, maxDd };
+    }
     function calcRealizedBySymbol() {
       const book = {};
       const sorted = [...state.trades].sort((a,b) => Number(a.order || 0) - Number(b.order || 0));
@@ -1274,6 +1382,7 @@
       renderPositions(positions);
       renderTrades();
       renderTp(positions);
+      if (document.getElementById("backtestForm")) renderBacktest();
       renderEquity(metrics);
       renderAllocation(metrics, positions);
       renderBil(metrics);
@@ -1426,6 +1535,61 @@
             <button class="tp-reset" type="button" data-reset-tp="${p.symbol}">重設為預設值</button>
           </article>`;
       }).join("") || `<div class="empty">新增持股後自動產生 TP Planner。</div>`;
+    }
+    function renderBacktest() {
+      if (!document.getElementById("backtestForm")) return;
+      const settings = state.backtestSettings || {};
+      document.getElementById("backtestCapitalInput").value = settings.capital || 0;
+      document.getElementById("backtestRiskPctInput").value = settings.riskPct || 0;
+      document.getElementById("backtestRiskAmountInput").value = Number(settings.riskAmount || 0).toFixed(2);
+
+      const rows = calcBacktestRows();
+      const m = calcBacktestMetrics(rows);
+      const pf = Number.isFinite(m.profitFactor) ? pctFmt.format(m.profitFactor) : "∞";
+      const items = [
+        ["回測損益", `${money(m.totalPnl)} (${pctFmt.format(m.ret)}%)`, m.totalPnl],
+        ["交易筆數", `${m.count}`, 0],
+        ["勝率", `${pctFmt.format(m.winRate)}%`, m.winRate - 50],
+        ["Profit Factor", pf, m.profitFactor - 1],
+        ["平均 R", m.avgR.toFixed(2), m.avgR],
+        ["最大回撤", `${pctFmt.format(m.maxDd)}%`, m.maxDd]
+      ];
+      document.getElementById("backtestKpis").innerHTML = items.map(([label, value, signal]) => `
+        <div class="backtest-kpi">
+          <div class="label">${label}</div>
+          <div class="value ${Number(signal || 0) > 0 ? "good" : Number(signal || 0) < 0 ? "bad" : ""}">${value}</div>
+        </div>`).join("");
+      document.getElementById("backtestRules").innerHTML = `
+        <strong>回測模型</strong>
+        <span>每筆風險金額 = 回測本金 × 每筆風險%。系統用停損 pips × 每 pip 價值換算整數口數；若停損風險超過本金或風險上限，會自動減少口數。</span>
+        <span>平均勝 R：<strong>${m.avgWinR.toFixed(2)}</strong> ｜ 平均虧 R：<strong>${m.avgLossR.toFixed(2)}</strong> ｜ 期望值：<strong>${m.avgR.toFixed(2)}R / 筆</strong></span>
+        <label>策略筆記<textarea id="backtestStrategyNote" placeholder="盤前想法、進場假設、觀察重點...">${state.backtestSettings.strategyNote || ""}</textarea></label>`;
+      document.getElementById("backtestBody").innerHTML = rows.map(row => `
+        <tr>
+          <td class="left">${row.date || ""}</td>
+          <td>${row.symbol || ""}</td>
+          <td><span class="pill">${row.direction || "LONG"}</span></td>
+          <td>${row.session || ""}</td>
+          <td>${money(row.entry)}</td>
+          <td>${row.stopPips}</td>
+          <td>${row.targetPips}</td>
+          <td class="${row.exitPips >= 0 ? "good" : "bad"}">${row.exitPips}</td>
+          <td>${row.shares}</td>
+          <td>${money(row.fees)}</td>
+          <td class="${row.actualR >= 0 ? "good" : "bad"}">${row.actualR.toFixed(2)}R <span class="muted">/ 計畫 ${row.plannedR.toFixed(2)}R</span></td>
+          <td class="${row.pnl >= 0 ? "good" : "bad"}">${money(row.pnl)}</td>
+          <td class="left"><textarea data-backtest="${row.id}" data-field="note" placeholder="備註">${row.note || ""}</textarea></td>
+          <td><button class="danger" data-delete-backtest="${row.id}">刪除</button></td>
+        </tr>`).join("") || `<tr><td colspan="14" class="left muted">尚無回測紀錄，先新增一筆回測。</td></tr>`;
+      if (typeof Chart === "undefined") return;
+      if (backtestChart) backtestChart.destroy();
+      const labels = ["Start", ...rows.map((row, index) => `${index + 1}. ${row.symbol || ""}`)];
+      const data = [Number(settings.capital || 0), ...rows.map(row => row.equity)];
+      backtestChart = new Chart(document.getElementById("backtestChart"), {
+        type: "line",
+        data: { labels, datasets: [{ label: "回測權益曲線", data, borderColor: "#4aa3ff", backgroundColor: "rgba(74,163,255,.14)", fill: true, tension: .28 }] },
+        options: chartOpts()
+      });
     }
     function renderEquity(metrics) {
       const series = buildEquitySeries(state.settings.equityStartMonth);
@@ -1926,10 +2090,45 @@
       state.settings[map[e.target.id]] = e.target.id === "cashYieldSymbolsInput" ? e.target.value : Number(e.target.value || 0);
       render();
     }
+    function updateBacktestSettings(e) {
+      const map = {
+        backtestCapitalInput: "capital",
+        backtestRiskPctInput: "riskPct",
+        backtestRiskAmountInput: "riskAmount"
+      };
+      const key = map[e.target.id];
+      if (!key) return;
+      state.backtestSettings ||= {};
+      state.backtestSettings[key] = ["capital", "riskPct", "riskAmount"].includes(key) ? Number(e.target.value || 0) : e.target.value;
+      if (key === "riskPct" || key === "capital") {
+        state.backtestSettings.riskAmount = Number(state.backtestSettings.capital || 0) * Number(state.backtestSettings.riskPct || 0) / 100;
+        const amountInput = document.getElementById("backtestRiskAmountInput");
+        if (amountInput && document.activeElement !== amountInput) amountInput.value = state.backtestSettings.riskAmount.toFixed(2);
+      }
+      if (key === "riskAmount") {
+        const capital = Number(state.backtestSettings.capital || 0);
+        state.backtestSettings.riskPct = capital ? Number(state.backtestSettings.riskAmount || 0) / capital * 100 : 0;
+        const pctInput = document.getElementById("backtestRiskPctInput");
+        if (pctInput && document.activeElement !== pctInput) pctInput.value = state.backtestSettings.riskPct.toFixed(2);
+      }
+      if (e.type === "input") {
+        save();
+        return;
+      }
+      render();
+    }
     function bindEvents() {
       ["capitalInput","fxInput","cashYieldSymbolsInput"].forEach(id => document.getElementById(id).addEventListener("change", updateSettings));
+      ["backtestCapitalInput","backtestRiskPctInput","backtestRiskAmountInput"].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+          el.addEventListener("change", updateBacktestSettings);
+          el.addEventListener("input", updateBacktestSettings);
+        }
+      });
       document.getElementById("tradeDate").valueAsDate = new Date();
       document.getElementById("depositDate").valueAsDate = new Date();
+      if (document.getElementById("btDate")) document.getElementById("btDate").valueAsDate = new Date();
       document.getElementById("tradePrice").addEventListener("input", autoTradeCalc);
       document.getElementById("tradeShares").addEventListener("input", () => { lastAmountEdited = false; autoTradeCalc(); });
       document.getElementById("tradeAmount").addEventListener("input", () => { lastAmountEdited = true; autoTradeCalc(); });
@@ -1961,6 +2160,30 @@
         document.getElementById("depositDate").valueAsDate = new Date();
         render();
       });
+      if (document.getElementById("backtestForm")) document.getElementById("backtestForm").addEventListener("submit", e => {
+        e.preventDefault();
+        const symbol = document.getElementById("btSymbol").value.toUpperCase().trim();
+        const entry = Number(document.getElementById("btEntry").value || 0);
+        const stop = Number(document.getElementById("btStop").value || 0);
+        const exit = Number(document.getElementById("btExit").value || 0);
+        if (!symbol || !entry || !stop || !exit || entry === stop) return;
+        state.backtests ||= [];
+        state.backtests.push({
+          id: uid(),
+          date: document.getElementById("btDate").value,
+          symbol,
+          direction: document.getElementById("btDirection").value,
+          entry,
+          stop,
+          target: Number(document.getElementById("btTarget").value || 0),
+          exit,
+          fees: Number(document.getElementById("btFees").value || 0),
+          note: document.getElementById("btNote").value
+        });
+        e.target.reset();
+        document.getElementById("btDate").valueAsDate = new Date();
+        render();
+      });
       document.getElementById("applyEquityStartBtn").addEventListener("click", () => {
         const startMonth = document.getElementById("equityStartInput").value || state.settings.equityStartMonth || firstTradeMonth();
         state.settings.equityStartMonth = startMonth;
@@ -1975,7 +2198,7 @@
       document.body.addEventListener("change", tableChange);
       document.body.addEventListener("focusin", e => {
         const t = e.target;
-        if (t && (t.dataset.trade || t.dataset.deposit || t.dataset.symbol || t.dataset.tpSymbol || t.dataset.yieldRate)) {
+        if (t && (t.dataset.trade || t.dataset.deposit || t.dataset.symbol || t.dataset.tpSymbol || t.dataset.yieldRate || t.dataset.backtest)) {
           isEditingTableField = true;
         }
       });
@@ -1991,6 +2214,8 @@
         if (id) { state.trades = state.trades.filter(t => t.id !== id); render(); }
         const depositId = e.target.dataset.deleteDeposit;
         if (depositId) { state.deposits = (state.deposits || []).filter(d => d.id !== depositId); render(); }
+        const backtestId = e.target.dataset.deleteBacktest;
+        if (backtestId) { state.backtests = (state.backtests || []).filter(row => row.id !== backtestId); render(); }
         const resetSymbol = e.target.dataset.resetTp;
         if (resetSymbol) {
           ensureSymbol(resetSymbol).tp = defaultTp();
@@ -2066,6 +2291,17 @@
         const d = (state.deposits || []).find(x => x.id === el.dataset.deposit);
         if (!d) return;
         d[el.dataset.field] = el.dataset.field === "amount" ? Number(el.value || 0) : el.value;
+        requestDeferredRender();
+      }
+      if (el.dataset.backtest) {
+        const row = (state.backtests || []).find(x => x.id === el.dataset.backtest);
+        if (!row) return;
+        if (el.id === "backtestStrategyNote") {
+          state.backtestSettings.strategyNote = el.value;
+          requestDeferredRender();
+          return;
+        }
+        row[el.dataset.field] = el.value;
         requestDeferredRender();
       }
       if (el.dataset.tpSymbol) {
@@ -2207,12 +2443,33 @@
         股票: p.symbol, TP百分比: tp.targetPct, 基準: tp.base, 出場部位百分比: tp.exitPct,
         預計出場股數: (tp.base === "total" ? p.shares : p.momentum) * tp.exitPct / 100
       })));
+      const backtestRows = calcBacktestRows().map(r => ({
+        日期: r.date,
+        商品: r.symbol,
+        方向: r.direction,
+        交易時段: r.session,
+        進場價: r.entry,
+        停損pips: r.stopPips,
+        目標pips: r.targetPips,
+        出場pips: r.exitPips,
+        手續費: r.fees,
+        每筆風險金額: r.riskDollars,
+        口數: r.shares,
+        有效風險金額: r.effectiveRisk,
+        計畫R: r.plannedR,
+        實際R: r.actualR,
+        損益: r.pnl,
+        權益: r.equity,
+        回撤百分比: r.drawdown,
+        備註: r.note
+      }));
       if (typeof XLSX === "undefined") return exportFallbackXls(positionRows, tpRows);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(positionRows), "持股明細");
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(state.trades), "交易紀錄");
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(state.deposits || []), "入金紀錄");
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(tpRows), "TP Planner");
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(backtestRows), "策略回測");
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(buildEquitySeries(state.settings.equityStartMonth).map(r => ({
         月份: r.month,
         月已實現損益: r.monthlyRealized,
@@ -2233,6 +2490,26 @@
         return `<h2>${esc(title)}</h2><table border="1"><tr>${cols.map(c => `<th>${esc(c)}</th>`).join("")}</tr>${rows.map(r => `<tr>${cols.map(c => `<td>${esc(r[c])}</td>`).join("")}</tr>`).join("")}</table>`;
       };
       const yieldRows = Object.entries(state.settings.yieldRates || {}).map(([symbol, r]) => ({ 股票: symbol, 年化收益率: r.rate, 來源: r.source, 更新時間: r.updatedAt }));
+      const backtestRows = calcBacktestRows().map(r => ({
+        日期: r.date,
+        商品: r.symbol,
+        方向: r.direction,
+        交易時段: r.session,
+        進場價: r.entry,
+        停損pips: r.stopPips,
+        目標pips: r.targetPips,
+        出場pips: r.exitPips,
+        手續費: r.fees,
+        每筆風險金額: r.riskDollars,
+        口數: r.shares,
+        有效風險金額: r.effectiveRisk,
+        計畫R: r.plannedR,
+        實際R: r.actualR,
+        損益: r.pnl,
+        權益: r.equity,
+        回撤百分比: r.drawdown,
+        備註: r.note
+      }));
       const equityRows = buildEquitySeries(state.settings.equityStartMonth).map(r => ({
         月份: r.month,
         月已實現損益: r.monthlyRealized,
@@ -2243,7 +2520,7 @@
         累積已實現損益百分比: r.cumPct,
         帳戶資產: r.value
       }));
-      const html = `<html><head><meta charset="utf-8"></head><body>${table("持股明細", positionRows)}${table("交易紀錄", state.trades)}${table("入金紀錄", state.deposits || [])}${table("TP Planner", tpRows)}${table("資產曲線", equityRows)}${table("短債ETF利率", yieldRows)}</body></html>`;
+      const html = `<html><head><meta charset="utf-8"></head><body>${table("持股明細", positionRows)}${table("交易紀錄", state.trades)}${table("入金紀錄", state.deposits || [])}${table("TP Planner", tpRows)}${table("策略回測", backtestRows)}${table("資產曲線", equityRows)}${table("短債ETF利率", yieldRows)}</body></html>`;
       const blob = new Blob([html], { type: "application/vnd.ms-excel;charset=utf-8" });
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
@@ -2271,6 +2548,13 @@
         BIL: { rate: state.settings.bilRate, source: "手動備援", updatedAt: new Date().toISOString() },
         SGOV: { rate: 0, source: "尚未抓取", updatedAt: "" }
       };
+      state.backtestSettings = { capital: 100000, riskPct: 1, riskAmount: 1000, strategyNote: "範例：只在高流動性時段測試突破與反轉，避免重大數據前後追單。" };
+      state.backtests = [
+        { id: uid(), date: "2025-01-08", symbol: "MNQ", direction: "LONG", session: "NYAM", entry: 18250, stop: 60, target: 170, exit: 155, note: "量能放大，接近計畫出場" },
+        { id: uid(), date: "2025-01-22", symbol: "NQ", direction: "LONG", session: "NYPM", entry: 18540, stop: 60, target: 140, exit: -35, note: "未延續，提早跌破結構" },
+        { id: uid(), date: "2025-02-14", symbol: "ES", direction: "SHORT", session: "London", entry: 5320, stop: 12, target: 28, exit: 24, note: "順勢落到目標區" },
+        { id: uid(), date: "2025-03-03", symbol: "MES", direction: "LONG", session: "AS", entry: 5286, stop: 12, target: 24, exit: 21, note: "接近 2R，按規則出場" }
+      ];
       state.equity = seedEquity().map((r, i) => ({ month: r.month, value: i < 12 ? 100000 + i * 1850 - (i === 4 ? 4200 : 0) : 0 }));
       render();
     }
