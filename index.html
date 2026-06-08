@@ -644,7 +644,6 @@
         </div>
         <div class="actions">
           <a class="button-link primary" href="/backtest.html">回測系統</a>
-          <button id="sampleBtn">載入範例</button>
         </div>
       </div>
     </header>
@@ -2193,7 +2192,6 @@
         state.settings.equityYearFilter = e.target.value || "ALL";
         render();
       });
-      document.getElementById("sampleBtn").addEventListener("click", loadSample);
       document.getElementById("exportEquityPngBtn").addEventListener("click", exportEquityPng);
       document.body.addEventListener("change", tableChange);
       document.body.addEventListener("focusin", e => {
