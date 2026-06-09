@@ -131,15 +131,33 @@ const tradingViewQuoteExchangeOrder = {
   QQQ: ["NASDAQ", "AMEX", "NYSEARCA", "ARCA", "NYSE"],
   IWM: ["AMEX", "NYSEARCA", "ARCA", "NYSE", "NASDAQ"],
   VOO: ["NYSEARCA", "AMEX", "ARCA", "NYSE", "NASDAQ"],
-  IVV: ["NYSEARCA", "AMEX", "ARCA", "NYSE", "NASDAQ"]
+  IVV: ["NYSEARCA", "AMEX", "ARCA", "NYSE", "NASDAQ"],
+  REED: ["AMEX", "OTC", "NYSE", "NASDAQ"],
+  NOC: ["NYSE", "NASDAQ", "AMEX"]
 };
 
-function quoteExchangeCandidates(symbol) {
-  return tradingViewQuoteExchangeOrder[symbol] || ["NASDAQ", "NYSE", "AMEX", "NYSEARCA", "ARCA", "BATS", "CBOE", "OTC"];
+function normalizeTradingViewExchange(exchange) {
+  const value = String(exchange || "").trim().toUpperCase();
+  const map = {
+    NYSEAMERICAN: "AMEX",
+    NYSEAM: "AMEX",
+    OTCQX: "OTC",
+    OTCMKTS: "OTC",
+    OTC: "OTC",
+    NYSEARCA: "NYSEARCA",
+    ARCA: "NYSEARCA",
+    NASDAQGS: "NASDAQ",
+    NASDAQGM: "NASDAQ"
+  };
+  return map[value] || value;
 }
 
-function tradingViewSymbolUrl(exchange, symbol) {
-  return `https://tw.tradingview.com/symbols/${exchange}-${encodeURIComponent(symbol)}/`;
+function quoteExchangeCandidates(symbol) {
+  return tradingViewQuoteExchangeOrder[symbol] || ["NYSE", "NASDAQ", "AMEX", "NYSEARCA", "BATS", "CBOE"];
+}
+
+function tradingViewSymbolUrl(exchange, symbol, domain = "www") {
+  return `https://${domain}.tradingview.com/symbols/${exchange}-${encodeURIComponent(symbol)}/`;
 }
 
 function extractTradingViewQuote(html, symbol) {
@@ -149,7 +167,9 @@ function extractTradingViewQuote(html, symbol) {
     new RegExp(`(?:The current price of|current price of)\\s+${sym}\\s+is\\s+([0-9][0-9,]*(?:\\.[0-9]+)?)\\s*USD`, "i"),
     new RegExp(`(?:${sym}\\s+trades at|${sym}\\s+stock price today is|${sym}\\s+price today is)\\s+([0-9][0-9,]*(?:\\.[0-9]+)?)\\s*USD`, "i"),
     new RegExp(`(?:price of\\s+${sym}|${sym}\\s+price)\\s+is\\s+([0-9][0-9,]*(?:\\.[0-9]+)?)\\s*USD`, "i"),
-    new RegExp(`\\b${sym}\\b[^\\d]{0,120}?([0-9][0-9,]*(?:\\.[0-9]+)?)\\s*USD`, "i")
+    new RegExp(`\\b${sym}\\b[^\\d]{0,200}?([0-9][0-9,]*(?:\\.[0-9]+)?)\\s*(?:USD|US\\$|\\$)`, "i"),
+    new RegExp(`(?:last|current|market|stock)\\s+price[^\\d]{0,40}?([0-9][0-9,]*(?:\\.[0-9]+)?)\\s*(?:USD|US\\$|\\$)?`, "i"),
+    new RegExp(`price[^\\d]{0,20}?([0-9][0-9,]*(?:\\.[0-9]+)?)\\s*(?:USD|US\\$|\\$)`, "i")
   ];
   for (const pattern of patterns) {
     const match = flat.match(pattern);
@@ -164,19 +184,22 @@ async function tradingViewQuote(symbol) {
   const unique = normalize(symbol);
   if (!unique) return null;
   for (const exchange of quoteExchangeCandidates(unique)) {
-    try {
-      const html = await textFrom(tradingViewSymbolUrl(exchange, unique));
-      const price = extractTradingViewQuote(html, unique);
-      if (!price) continue;
-      return {
-        symbol: unique,
-        price,
-        changePercent: null,
-        source: `TradingView official symbol page (${exchange})`,
-        updatedAt: new Date().toISOString()
-      };
-    } catch {
-      continue;
+    for (const domain of ["www", "tw"]) {
+      try {
+        const html = await textFrom(tradingViewSymbolUrl(exchange, unique, domain));
+        const price = extractTradingViewQuote(html, unique);
+        if (!price) continue;
+        return {
+          symbol: unique,
+          price,
+          exchange: normalizeTradingViewExchange(exchange),
+          changePercent: null,
+          source: `TradingView official symbol page (${domain}.${exchange})`,
+          updatedAt: new Date().toISOString()
+        };
+      } catch {
+        continue;
+      }
     }
   }
   return null;

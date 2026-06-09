@@ -1734,7 +1734,36 @@
     }
     function renderTradingView(positions) {
       if (!canUseTradingView) return;
-      const symbols = positions.length ? positions.map(p => [p.symbol, `${p.symbol === "BIL" ? "AMEX" : "NASDAQ"}:${p.symbol}|1D`]) : [["QQQ", "NASDAQ:QQQ|1D"], ["SPY", "AMEX:SPY|1D"], ["BIL", "AMEX:BIL|1D"]];
+      const normalizeExchange = value => {
+        const v = String(value || "").toUpperCase();
+        const map = {
+          NYSEAMERICAN: "AMEX",
+          NYSEAM: "AMEX",
+          OTCQX: "OTC",
+          OTCMKTS: "OTC",
+          ARCA: "NYSEARCA",
+          NASDAQGS: "NASDAQ",
+          NASDAQGM: "NASDAQ"
+        };
+        return map[v] || v;
+      };
+      const resolveExchange = symbol => {
+        const tv = normalizeExchange(state.symbols?.[symbol]?.tradingViewExchange);
+        if (tv) return tv;
+        const fallback = {
+          SPY: "NYSEARCA",
+          BIL: "NYSEARCA",
+          SGOV: "NYSEARCA",
+          QQQ: "NASDAQ",
+          IWM: "NYSEARCA",
+          VOO: "NYSEARCA",
+          IVV: "NYSEARCA"
+        };
+        return fallback[String(symbol || "").toUpperCase()] || "NASDAQ";
+      };
+      const symbols = positions.length
+        ? positions.map(p => [p.symbol, `${resolveExchange(p.symbol)}:${p.symbol}|1D`])
+        : [["QQQ", "NASDAQ:QQQ|1D"], ["SPY", "NYSEARCA:SPY|1D"], ["BIL", "NYSEARCA:BIL|1D"]];
       const signature = JSON.stringify(symbols);
       if (signature === lastTradingViewSymbols && document.querySelector(".tradingview-widget-container iframe")) return;
       lastTradingViewSymbols = signature;
@@ -2012,6 +2041,7 @@
         const price = Number(quote?.price || 0);
         if (!symbol || !price) continue;
         ensureSymbol(symbol);
+        if (quote.exchange) state.symbols[symbol].tradingViewExchange = String(quote.exchange).toUpperCase();
         if (Number(state.symbols[symbol].currentPrice || 0) !== price) {
           state.symbols[symbol].currentPrice = price;
           changed = true;
