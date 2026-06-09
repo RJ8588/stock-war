@@ -119,6 +119,13 @@
       grid-template-columns: repeat(3, minmax(120px, 1fr));
       margin-bottom: 12px;
     }
+    .backtest-date-range {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(160px, 1fr));
+      gap: 10px;
+      align-items: end;
+      margin-bottom: 12px;
+    }
     .backtest-kpis {
       display: grid;
       grid-template-columns: repeat(6, minmax(130px, 1fr));
@@ -187,6 +194,7 @@
     .empty { color: var(--muted); padding: 20px; text-align: center; border: 1px dashed var(--line); border-radius: var(--radius); }
     @media (max-width: 1180px) {
       .backtest-settings, .backtest-kpis, .backtest-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .backtest-date-range { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
     @media (max-width: 720px) {
       .topbar { align-items: flex-start; flex-direction: column; }
@@ -196,11 +204,12 @@
       .form-grid label.wide { grid-column: 1 / -1; }
       .panel-head { align-items: flex-start; flex-direction: column; }
       .backtest-settings, .backtest-kpis, .backtest-summary { grid-template-columns: 1fr; }
+      .backtest-date-range { grid-template-columns: 1fr; }
       h1 { font-size: 19px; }
     }
     @media (max-width: 480px) {
       main { padding: 12px 10px 28px; }
-      .form-grid, .backtest-settings, .backtest-kpis, .backtest-summary { grid-template-columns: 1fr; }
+      .form-grid, .backtest-settings, .backtest-date-range, .backtest-kpis, .backtest-summary { grid-template-columns: 1fr; }
       button { padding: 8px 10px; }
     }
   </style>
@@ -261,6 +270,11 @@
             <label class="wide">備註<textarea id="btNote" placeholder="進場理由、失敗原因、可重複條件..."></textarea></label>
             <button class="primary" type="submit">加入回測</button>
           </form>
+          <div class="backtest-date-range">
+            <label>起始日期<input id="backtestRangeStart" type="date"></label>
+            <label>結束日期<input id="backtestRangeEnd" type="date"></label>
+          </div>
+          <div class="note">選取日期區間後，下方回測績效、權益曲線與日期表格會同步套用該區間。</div>
         </div>
       </section>
 
@@ -334,8 +348,9 @@
       nextTradeOrder: 1,
       deposits: [],
       symbols: {},
-      backtestSettings: { capital: 100000, riskPct: 1, riskAmount: 1000, strategyNote: "" },
+      backtestSettings: { capital: 100000, riskPct: 1, riskAmount: 1000, strategyNote: "", dateStart: "", dateEnd: "" },
       backtests: [],
+      nextBacktestOrder: 1,
       equity: seedEquity("2025-01")
     });
     let state = initialState();
@@ -351,12 +366,16 @@
       saved.deposits ||= [];
       saved.symbols ||= {};
       saved.equity ||= seedEquity();
-      saved.backtestSettings ||= { capital: 100000, riskPct: 1, riskAmount: 1000, strategyNote: "" };
+      saved.backtestSettings ||= { capital: 100000, riskPct: 1, riskAmount: 1000, strategyNote: "", dateStart: "", dateEnd: "" };
       saved.backtestSettings.capital = Number(saved.backtestSettings.capital || 100000);
       saved.backtestSettings.riskPct = Number(saved.backtestSettings.riskPct || 1);
       saved.backtestSettings.riskAmount = Number(saved.backtestSettings.riskAmount || (saved.backtestSettings.capital * saved.backtestSettings.riskPct / 100));
       saved.backtestSettings.strategyNote ||= "";
+      saved.backtestSettings.dateStart ||= "";
+      saved.backtestSettings.dateEnd ||= "";
       saved.backtests ||= [];
+      saved.nextBacktestOrder ||= (saved.backtests.reduce((m, row) => Math.max(m, Number(row.order || 0)), 0) + 1);
+      saved.backtests = saved.backtests.map((row, index) => ({ order: Number(row.order || index + 1), ...row }));
       return saved;
     }
     function loadLocalState() {
@@ -428,9 +447,55 @@
         return null;
       }
     }
+    function getBacktestDates() {
+      return [...new Set((state.backtests || []).map(row => String(row.date || "").slice(0, 10)).filter(Boolean))].sort();
+    }
+    function normalizeBacktestRange() {
+      const dates = getBacktestDates();
+      if (!dates.length) return { dates, start: "", end: "" };
+      const selectedStart = String(state.backtestSettings?.dateStart || "");
+      const selectedEnd = String(state.backtestSettings?.dateEnd || "");
+      let start = dates.includes(selectedStart) ? selectedStart : dates[0];
+      let end = dates.includes(selectedEnd) ? selectedEnd : dates[dates.length - 1];
+      if (start && end && start > end) [start, end] = [end, start];
+      state.backtestSettings ||= {};
+      state.backtestSettings.dateStart = start;
+      state.backtestSettings.dateEnd = end;
+      return { dates, start, end };
+    }
     function filteredBacktests() {
-      const rows = [...(state.backtests || [])].sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")));
+      const { start, end } = normalizeBacktestRange();
+      const rows = [...(state.backtests || [])]
+        .sort((a, b) => {
+          const dateDiff = String(a.date || "").localeCompare(String(b.date || ""));
+          if (dateDiff) return dateDiff;
+          return Number(a.order || 0) - Number(b.order || 0);
+        })
+        .filter(row => {
+          const date = String(row.date || "").slice(0, 10);
+          if (!date) return false;
+          if (start && date < start) return false;
+          if (end && date > end) return false;
+          return true;
+        });
       return rows;
+    }
+    function renderBacktestDateRangeSelects() {
+      const dates = getBacktestDates();
+      const { start, end } = normalizeBacktestRange();
+      const startInput = document.getElementById("backtestRangeStart");
+      const endInput = document.getElementById("backtestRangeEnd");
+      if (!startInput || !endInput) return;
+      const minDate = dates[0] || "";
+      const maxDate = dates[dates.length - 1] || "";
+      startInput.min = minDate;
+      startInput.max = maxDate;
+      endInput.min = minDate;
+      endInput.max = maxDate;
+      startInput.value = start || "";
+      endInput.value = end || "";
+      startInput.disabled = !dates.length;
+      endInput.disabled = !dates.length;
     }
     function calcBacktestRows() {
       const capital = Number(state.backtestSettings?.capital || 0);
@@ -535,7 +600,8 @@
       document.getElementById("backtestCapitalInput").value = settings.capital || 0;
       document.getElementById("backtestRiskPctInput").value = settings.riskPct || 0;
       document.getElementById("backtestRiskAmountInput").value = Number(settings.riskAmount || 0).toFixed(2);
-
+      renderBacktestDateRangeSelects();
+      const range = normalizeBacktestRange();
       const rows = calcBacktestRows();
       const m = calcBacktestMetrics(rows);
       const pf = Number.isFinite(m.profitFactor) ? pctFmt.format(m.profitFactor) : "∞";
@@ -556,6 +622,7 @@
         <strong>回測模型</strong>
         <span>每筆風險金額 = 回測本金 × 每筆風險%。系統用停損 pips × 每 pip 價值換算整數口數；若停損風險超過本金或風險上限，會自動減少口數。</span>
         <span>平均勝 R：<strong>${m.avgWinR.toFixed(2)}</strong> ｜ 平均虧 R：<strong>${m.avgLossR.toFixed(2)}</strong> ｜ 期望值：<strong>${m.avgR.toFixed(2)}R / 筆</strong></span>
+        <span>資料區間：<strong>${range.start || "全部"} ～ ${range.end || "全部"}</strong></span>
         <label>策略筆記<textarea id="backtestStrategyNote" placeholder="盤前想法、進場假設、觀察重點...">${state.backtestSettings.strategyNote || ""}</textarea></label>`;
       document.getElementById("backtestBody").innerHTML = rows.map(row => `
         <tr>
@@ -576,7 +643,7 @@
         </tr>`).join("") || `<tr><td colspan="14" class="left muted">尚無回測紀錄，先新增一筆回測。</td></tr>`;
       if (typeof Chart === "undefined") return;
       if (backtestChart) backtestChart.destroy();
-      const labels = ["Start", ...rows.map((row, index) => `${index + 1}. ${row.symbol || ""}`)];
+      const labels = ["Start", ...rows.map(row => row.date || "")];
       const data = [Number(settings.capital || 0), ...rows.map(row => row.equity)];
       backtestChart = new Chart(document.getElementById("backtestChart"), {
         type: "line",
@@ -616,6 +683,16 @@
         el.addEventListener("change", updateBacktestSettings);
         el.addEventListener("input", updateBacktestSettings);
       });
+      ["backtestRangeStart", "backtestRangeEnd"].forEach(id => {
+        const el = document.getElementById(id);
+        el.addEventListener("change", e => {
+          state.backtestSettings ||= {};
+          if (id === "backtestRangeStart") state.backtestSettings.dateStart = e.target.value || "";
+          if (id === "backtestRangeEnd") state.backtestSettings.dateEnd = e.target.value || "";
+          normalizeBacktestRange();
+          render();
+        });
+      });
       document.getElementById("btDate").valueAsDate = new Date();
       const refreshFeeInput = () => {
         document.getElementById("btFees").value = contractRoundTripFee(document.getElementById("btSymbol").value).toFixed(2);
@@ -640,6 +717,7 @@
         state.backtests ||= [];
         state.backtests.push({
           id: uid(),
+          order: Number(state.nextBacktestOrder || 1),
           date: document.getElementById("btDate").value,
           symbol,
           direction: document.getElementById("btDirection").value,
@@ -652,6 +730,7 @@
           fees: contractRoundTripFee(symbol),
           note: document.getElementById("btNote").value
         });
+        state.nextBacktestOrder = Number(state.nextBacktestOrder || 1) + 1;
         e.target.reset();
         document.getElementById("btDate").valueAsDate = new Date();
         document.getElementById("btSymbol").value = "MNQ";
