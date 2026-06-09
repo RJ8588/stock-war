@@ -440,17 +440,47 @@
       width: 100%;
     }
     .tv-single-widget {
-      border: 1px solid var(--line);
+      border: 1px solid rgba(28, 38, 53, .45);
       border-radius: var(--radius);
-      background: rgba(8, 13, 24, .9);
+      background: var(--bg);
       overflow: hidden;
       min-height: 92px;
+      box-shadow: none;
     }
     .tv-single-widget .tradingview-widget-container,
     .tv-single-widget .tradingview-widget-container__widget {
       height: 92px;
       min-height: 92px;
+      background: var(--bg);
     }
+    .tv-single-widget iframe {
+      display: block;
+      background: var(--bg) !important;
+      color-scheme: dark;
+    }
+    .tv-price-card {
+      display: grid;
+      gap: 10px;
+      min-height: 112px;
+      padding: 13px;
+      border: 1px solid rgba(28, 38, 53, .45);
+      border-radius: var(--radius);
+      background: var(--bg);
+      text-decoration: none;
+      color: var(--text);
+    }
+    .tv-price-card:hover { border-color: rgba(74, 163, 255, .55); transform: none; }
+    .tv-price-top, .tv-price-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .tv-price-symbol { color: #64dffb; font-size: 18px; font-weight: 900; }
+    .tv-price-exchange { color: var(--muted); font-size: 11px; }
+    .tv-price-value { font-size: 24px; font-weight: 900; }
+    .tv-price-label { color: var(--muted); font-size: 12px; }
+    .tv-price-meta { color: var(--muted); font-size: 11px; line-height: 1.45; }
     .tradingview-widget-copyright { display: none; }
     .quote-fallback-grid {
       display: grid;
@@ -1863,25 +1893,33 @@
       container.innerHTML = "";
       const grid = document.createElement("div");
       grid.className = "tv-quote-grid";
+      const positionMap = new Map((positions || []).map(p => [p.symbol, p]));
       rows.forEach(row => {
-        const card = document.createElement("div");
-        card.className = "tv-single-widget";
-        const widget = document.createElement("div");
-        widget.className = "tradingview-widget-container";
-        widget.innerHTML = `<div class="tradingview-widget-container__widget"></div><div class="tradingview-widget-copyright"></div>`;
-        const script = document.createElement("script");
-        script.type = "text/javascript";
-        script.src = "https://s3.tradingview.com/external-embedding/embed-widget-single-quote.js";
-        script.async = true;
-        script.textContent = JSON.stringify({
-          symbol: row.tvSymbol,
-          colorTheme: "dark",
-          isTransparent: true,
-          locale: "zh_TW",
-          width: "100%"
-        });
-        widget.appendChild(script);
-        card.appendChild(widget);
+        const card = document.createElement("a");
+        const [exchange, symbol] = row.tvSymbol.split(":");
+        const meta = state.symbols?.[row.symbol] || {};
+        const position = positionMap.get(row.symbol);
+        const price = Number(meta.currentPrice || 0);
+        const avg = Number(position?.avg || 0);
+        const pnlPct = avg && price ? (price - avg) / avg * 100 : 0;
+        card.className = "tv-price-card";
+        card.href = `https://www.tradingview.com/symbols/${encodeURIComponent(exchange)}-${encodeURIComponent(symbol)}/`;
+        card.target = "_blank";
+        card.rel = "noopener";
+        card.innerHTML = `
+          <div class="tv-price-top">
+            <span class="tv-price-symbol">${row.symbol}</span>
+            <span class="tv-price-exchange">${exchange}</span>
+          </div>
+          <div class="tv-price-row">
+            <span class="tv-price-label">現價</span>
+            <span class="tv-price-value">${price ? money(price) : "等待報價"}</span>
+          </div>
+          <div class="tv-price-row">
+            <span class="tv-price-label">均成本</span>
+            <span class="${pnlPct >= 0 ? "good" : "bad"}">${avg ? money(avg) : "-"}</span>
+          </div>
+          <div class="tv-price-meta">TradingView 官方代碼：${row.tvSymbol}${avg && price ? ` ｜ ${pct(pnlPct)}` : ""}</div>`;
         grid.appendChild(card);
       });
       container.appendChild(grid);

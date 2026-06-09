@@ -4,6 +4,7 @@ const path = require("path");
 
 const root = __dirname;
 const port = Number(process.env.PORT || 4173);
+const host = process.env.HOST || "0.0.0.0";
 const stateFile = path.join(root, ".data", "dashboard-state.json");
 const fngCacheFile = path.join(root, ".data", "cnn-fng-cache.json");
 let fearGreedMemoryCache = null;
@@ -428,6 +429,6 @@ http.createServer(async (req, res) => {
   } catch {
     send(res, 404, "not found");
   }
-}).listen(port, "127.0.0.1", () => {
-  console.log(`Dashboard running at http://127.0.0.1:${port}/`);
+}).listen(port, host, () => {
+  console.log(`Dashboard running at http://localhost:${port}/`);
 });
