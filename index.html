@@ -432,8 +432,25 @@
       background: linear-gradient(180deg, #0c121b, #101722);
       z-index: 0;
     }
-    .tv-widget-container, .tradingview-widget-container__widget { height: 100%; min-height: 520px; }
-    .tv-widget-container { position: relative; z-index: 1; background: transparent; }
+    .tv-widget-container { position: relative; z-index: 1; background: transparent; min-height: 0; }
+    .tv-quote-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+      width: 100%;
+    }
+    .tv-single-widget {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(8, 13, 24, .9);
+      overflow: hidden;
+      min-height: 92px;
+    }
+    .tv-single-widget .tradingview-widget-container,
+    .tv-single-widget .tradingview-widget-container__widget {
+      height: 92px;
+      min-height: 92px;
+    }
     .tradingview-widget-copyright { display: none; }
     .quote-fallback-grid {
       display: grid;
@@ -672,7 +689,7 @@
             <h2>TradingView 即時股價</h2>
             <span class="note">持股 ticker 會自動同步到右側行情列表</span>
           </div>
-          <div class="tradingview-widget-container"><div class="tradingview-widget-container__widget"></div></div>
+          <div id="tradingViewWidget" class="tv-widget-container"></div>
         </div>
         <div class="panel">
           <div class="panel-head"><h2>資產配置</h2></div>
@@ -930,6 +947,9 @@
     let lastQuoteFetchAt = 0;
     let quoteRefreshTimer = null;
     let quoteRefreshInFlight = false;
+    let lastTradingViewResolveSymbols = "";
+    let lastTradingViewResolveAt = 0;
+    let tradingViewResolveInFlight = false;
     let fearGreedRefreshTimer = null;
     let fearGreedRefreshInFlight = false;
     let fearGreedLastSuccessAt = 0;
@@ -1732,89 +1752,140 @@
         </div>
         <p class="note">自動更新優先來源：<a href="${BIL_SOURCE_URL}" target="_blank" rel="noopener">SSGA BIL</a>、<a href="${SGOV_SOURCE_URL}" target="_blank" rel="noopener">iShares SGOV</a>。若官方來源暫時不可用，才回退 Yahoo Finance 與手動備援值。${updated ? `最近更新：${new Date(updated).toLocaleString("zh-TW")}` : ""}</p>`;
     }
+    function normalizeTradingViewExchange(value) {
+      const v = String(value || "").trim().toUpperCase();
+      const map = {
+        NYSEAMERICAN: "AMEX",
+        NYSEAM: "AMEX",
+        OTCQX: "OTC",
+        OTCMKTS: "OTC",
+        ARCA: "NYSEARCA",
+        NASDAQGS: "NASDAQ",
+        NASDAQGM: "NASDAQ"
+      };
+      return map[v] || v;
+    }
+    function tradingViewFallbackExchange(symbol) {
+      const fallback = {
+        SPY: "NYSEARCA",
+        BIL: "NYSEARCA",
+        SGOV: "NYSEARCA",
+        QQQ: "NASDAQ",
+        IWM: "NYSEARCA",
+        VOO: "NYSEARCA",
+        IVV: "NYSEARCA",
+        NOC: "NYSE",
+        REED: "AMEX"
+      };
+      return fallback[String(symbol || "").toUpperCase()] || "NASDAQ";
+    }
+    function resolveTradingViewExchange(symbol) {
+      const normalizedSymbol = String(symbol || "").trim().toUpperCase();
+      const forced = { NOC: "NYSE", REED: "AMEX" }[normalizedSymbol] || "";
+      const saved = normalizeTradingViewExchange(state.symbols?.[normalizedSymbol]?.tradingViewExchange);
+      if (saved && !(forced && saved === "NASDAQ")) return saved;
+      return forced || tradingViewFallbackExchange(normalizedSymbol);
+    }
+    function tradingViewRows(positions) {
+      const raw = positions.length ? positions.map(p => p.symbol) : ["QQQ", "SPY", "BIL"];
+      const symbols = [...new Set(raw.map(s => String(s || "").trim().toUpperCase()).filter(Boolean))];
+      return symbols.map(symbol => ({
+        symbol,
+        tvSymbol: `${resolveTradingViewExchange(symbol)}:${symbol}`
+      }));
+    }
+    function cleanTradingViewSearchSymbol(value) {
+      return String(value || "").replace(/<[^>]*>/g, "").trim().toUpperCase();
+    }
+    async function fetchTradingViewExchange(symbol) {
+      const normalizedSymbol = String(symbol || "").trim().toUpperCase();
+      if (!normalizedSymbol) return "";
+      const url = `https://symbol-search.tradingview.com/symbol_search/?text=${encodeURIComponent(normalizedSymbol)}&type=stock&hl=1&lang=en&domain=production`;
+      const response = await fetch(url, { cache: "no-store" });
+      if (!response.ok) throw new Error(`TradingView symbol search ${response.status}`);
+      const rows = await response.json();
+      const exact = (Array.isArray(rows) ? rows : [])
+        .filter(row => cleanTradingViewSearchSymbol(row.symbol) === normalizedSymbol)
+        .sort((a, b) => {
+          const primary = Number(Boolean(b.is_primary_listing)) - Number(Boolean(a.is_primary_listing));
+          if (primary) return primary;
+          const us = Number(String(b.country || "").toUpperCase() === "US") - Number(String(a.country || "").toUpperCase() === "US");
+          if (us) return us;
+          return 0;
+        });
+      const picked = exact[0];
+      return normalizeTradingViewExchange(picked?.prefix || picked?.source_id || picked?.source2?.id || picked?.exchange);
+    }
+    async function resolveTradingViewExchanges(symbols) {
+      if (!canUseTradingView || location.protocol === "file:" || tradingViewResolveInFlight) return false;
+      const unique = [...new Set((symbols || []).map(s => String(s || "").trim().toUpperCase()).filter(Boolean))];
+      if (!unique.length) return false;
+      const signature = unique.join(",");
+      const now = Date.now();
+      if (signature === lastTradingViewResolveSymbols && now - lastTradingViewResolveAt < 300000) return false;
+      tradingViewResolveInFlight = true;
+      let changed = false;
+      try {
+        for (const symbol of unique) {
+          const exchange = await fetchTradingViewExchange(symbol);
+          if (!exchange) continue;
+          ensureSymbol(symbol);
+          if (state.symbols[symbol].tradingViewExchange !== exchange) {
+            state.symbols[symbol].tradingViewExchange = exchange;
+            changed = true;
+          }
+        }
+        lastTradingViewResolveSymbols = signature;
+        lastTradingViewResolveAt = now;
+      } catch {
+        lastTradingViewResolveSymbols = signature;
+        lastTradingViewResolveAt = now;
+      } finally {
+        tradingViewResolveInFlight = false;
+      }
+      if (changed) {
+        lastTradingViewSymbols = "";
+        render();
+      }
+      return changed;
+    }
     function renderTradingView(positions) {
       if (!canUseTradingView) return;
-      const normalizeExchange = value => {
-        const v = String(value || "").toUpperCase();
-        const map = {
-          NYSEAMERICAN: "AMEX",
-          NYSEAM: "AMEX",
-          OTCQX: "OTC",
-          OTCMKTS: "OTC",
-          ARCA: "NYSEARCA",
-          NASDAQGS: "NASDAQ",
-          NASDAQGM: "NASDAQ"
-        };
-        return map[v] || v;
-      };
-      const resolveExchange = symbol => {
-        const tv = normalizeExchange(state.symbols?.[symbol]?.tradingViewExchange);
-        if (tv) return tv;
-        const fallback = {
-          SPY: "NYSEARCA",
-          BIL: "NYSEARCA",
-          SGOV: "NYSEARCA",
-          QQQ: "NASDAQ",
-          IWM: "NYSEARCA",
-          VOO: "NYSEARCA",
-          IVV: "NYSEARCA"
-        };
-        return fallback[String(symbol || "").toUpperCase()] || "NASDAQ";
-      };
-      const symbols = positions.length
-        ? positions.map(p => [p.symbol, `${resolveExchange(p.symbol)}:${p.symbol}|1D`])
-        : [["QQQ", "NASDAQ:QQQ|1D"], ["SPY", "NYSEARCA:SPY|1D"], ["BIL", "NYSEARCA:BIL|1D"]];
-      const signature = JSON.stringify(symbols);
-      if (signature === lastTradingViewSymbols && document.querySelector(".tradingview-widget-container iframe")) return;
+      const rows = tradingViewRows(positions);
+      const signature = JSON.stringify(rows);
+      const container = document.getElementById("tradingViewWidget");
+      if (!container) return;
+      if (signature === lastTradingViewSymbols && container.querySelector("iframe")) {
+        resolveTradingViewExchanges(rows.map(row => row.symbol));
+        return;
+      }
       lastTradingViewSymbols = signature;
-      const container = document.querySelector(".tradingview-widget-container");
-      container.innerHTML = `
-        <div class="tradingview-widget-container__widget"></div>
-        <div class="tradingview-widget-copyright"><a href="https://www.tradingview.com/" rel="noopener nofollow" target="_blank">Track all markets on TradingView</a></div>`;
-      const s = document.createElement("script");
-      s.type = "text/javascript";
-      s.src = "https://s3.tradingview.com/external-embedding/embed-widget-symbol-overview.js";
-      s.async = true;
-      s.textContent = JSON.stringify({
-        lineWidth: 2,
-        lineType: 0,
-        chartType: "area",
-        fontColor: "rgb(145, 161, 184)",
-        gridLineColor: "rgba(37, 49, 67, 0.55)",
-        volumeUpColor: "rgba(47, 208, 165, 0.35)",
-        volumeDownColor: "rgba(255, 95, 112, 0.35)",
-        backgroundColor: "#0c121b",
-        widgetFontColor: "#e7eefb",
-        upColor: "#2fd0a5",
-        downColor: "#ff5f70",
-        borderUpColor: "#2fd0a5",
-        borderDownColor: "#ff5f70",
-        wickUpColor: "#2fd0a5",
-        wickDownColor: "#ff5f70",
-        symbols,
-        chartOnly: false,
-        width: "100%",
-        height: 520,
-        locale: "zh_TW",
-        colorTheme: "dark",
-        autosize: true,
-        isTransparent: false,
-        showVolume: true,
-        showMA: true,
-        dateRanges: ["1d|1", "1m|30", "3m|60", "12m|1D", "60m|1W", "all|1M"],
-        hideDateRanges: false,
-        hideMarketStatus: false,
-        hideSymbolLogo: false,
-        scalePosition: "right",
-        scaleMode: "Normal",
-        fontFamily: "Inter, sans-serif",
-        fontSize: "12",
-        headerFontSize: "medium",
-        noTimeScale: false,
-        valuesTracking: "1",
-        changeMode: "price-and-percent"
+      container.innerHTML = "";
+      const grid = document.createElement("div");
+      grid.className = "tv-quote-grid";
+      rows.forEach(row => {
+        const card = document.createElement("div");
+        card.className = "tv-single-widget";
+        const widget = document.createElement("div");
+        widget.className = "tradingview-widget-container";
+        widget.innerHTML = `<div class="tradingview-widget-container__widget"></div><div class="tradingview-widget-copyright"></div>`;
+        const script = document.createElement("script");
+        script.type = "text/javascript";
+        script.src = "https://s3.tradingview.com/external-embedding/embed-widget-single-quote.js";
+        script.async = true;
+        script.textContent = JSON.stringify({
+          symbol: row.tvSymbol,
+          colorTheme: "dark",
+          isTransparent: true,
+          locale: "zh_TW",
+          width: "100%"
+        });
+        widget.appendChild(script);
+        card.appendChild(widget);
+        grid.appendChild(card);
       });
-      container.appendChild(s);
+      container.appendChild(grid);
+      resolveTradingViewExchanges(rows.map(row => row.symbol));
     }
     function fearGreedRatingClass(value) {
       return String(value || "").trim().toLowerCase().replace(/\s+/g, "-");
@@ -2039,10 +2110,13 @@
       for (const quote of quotes || []) {
         const symbol = String(quote?.symbol || "").trim().toUpperCase();
         const price = Number(quote?.price || 0);
-        if (!symbol || !price) continue;
+        if (!symbol) continue;
         ensureSymbol(symbol);
-        if (quote.exchange) state.symbols[symbol].tradingViewExchange = String(quote.exchange).toUpperCase();
-        if (Number(state.symbols[symbol].currentPrice || 0) !== price) {
+        if (quote.exchange && state.symbols[symbol].tradingViewExchange !== String(quote.exchange).toUpperCase()) {
+          state.symbols[symbol].tradingViewExchange = String(quote.exchange).toUpperCase();
+          changed = true;
+        }
+        if (price && Number(state.symbols[symbol].currentPrice || 0) !== price) {
           state.symbols[symbol].currentPrice = price;
           changed = true;
         }
@@ -2094,7 +2168,7 @@
             <h2>TradingView 即時股價</h2>
             <span class="note">持股代號會同步顯示；現價同步更新到持股明細</span>
           </div>
-          <div class="tradingview-widget-container"><div class="tradingview-widget-container__widget"></div></div>
+          <div id="tradingViewWidget" class="tv-widget-container"></div>
           <div class="panel-body subpanel">
             <div id="fearGreedPanel" class="empty">載入 CNN 官方市場情緒資料中...</div>
           </div>

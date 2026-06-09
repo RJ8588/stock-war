@@ -10,6 +10,7 @@ let fearGreedMemoryCache = null;
 let fearGreedMemoryCachedAt = 0;
 let fearGreedInFlight = null;
 const fearGreedCacheTtlMs = 45 * 1000;
+const tradingViewSymbolSearchCache = new Map();
 
 const snapshots = {
   BIL: {
@@ -160,6 +161,53 @@ function tradingViewSymbolUrl(exchange, symbol, domain = "www") {
   return `https://${domain}.tradingview.com/symbols/${exchange}-${encodeURIComponent(symbol)}/`;
 }
 
+function cleanTradingViewSymbol(value) {
+  return String(value || "").replace(/<[^>]*>/g, "").trim().toUpperCase();
+}
+
+async function resolveTradingViewSymbol(symbol) {
+  const unique = normalize(symbol);
+  if (!unique) return null;
+  if (tradingViewSymbolSearchCache.has(unique)) return tradingViewSymbolSearchCache.get(unique);
+  try {
+    const url = `https://symbol-search.tradingview.com/symbol_search/?text=${encodeURIComponent(unique)}&type=stock&hl=1&lang=en&domain=production`;
+    const res = await fetch(url, {
+      headers: {
+        "accept": "application/json,text/plain,*/*",
+        "origin": "https://www.tradingview.com",
+        "referer": "https://www.tradingview.com/",
+        "user-agent": "Mozilla/5.0"
+      }
+    });
+    if (!res.ok) throw new Error(`TradingView symbol search ${res.status}`);
+    const rows = await res.json();
+    const exact = (Array.isArray(rows) ? rows : [])
+      .filter(row => cleanTradingViewSymbol(row.symbol) === unique)
+      .sort((a, b) => {
+        const primary = Number(Boolean(b.is_primary_listing)) - Number(Boolean(a.is_primary_listing));
+        if (primary) return primary;
+        const us = Number(String(b.country || "").toUpperCase() === "US") - Number(String(a.country || "").toUpperCase() === "US");
+        if (us) return us;
+        return 0;
+      });
+    const picked = exact[0];
+    if (!picked) {
+      tradingViewSymbolSearchCache.set(unique, null);
+      return null;
+    }
+    const exchange = normalizeTradingViewExchange(picked.prefix || picked.source_id || picked.source2?.id || picked.exchange);
+    const resolved = exchange ? {
+      symbol: unique,
+      exchange,
+      description: String(picked.description || "").replace(/<[^>]*>/g, "")
+    } : null;
+    tradingViewSymbolSearchCache.set(unique, resolved);
+    return resolved;
+  } catch {
+    return null;
+  }
+}
+
 function extractTradingViewQuote(html, symbol) {
   const flat = String(html || "").replace(/\s+/g, " ");
   const sym = escapeRegExp(symbol);
@@ -183,7 +231,12 @@ function extractTradingViewQuote(html, symbol) {
 async function tradingViewQuote(symbol) {
   const unique = normalize(symbol);
   if (!unique) return null;
-  for (const exchange of quoteExchangeCandidates(unique)) {
+  const resolved = await resolveTradingViewSymbol(unique);
+  const exchanges = [...new Set([
+    resolved?.exchange,
+    ...quoteExchangeCandidates(unique)
+  ].filter(Boolean).map(normalizeTradingViewExchange))];
+  for (const exchange of exchanges) {
     for (const domain of ["www", "tw"]) {
       try {
         const html = await textFrom(tradingViewSymbolUrl(exchange, unique, domain));
@@ -202,7 +255,15 @@ async function tradingViewQuote(symbol) {
       }
     }
   }
-  return null;
+  if (!resolved?.exchange) return null;
+  return {
+    symbol: unique,
+    price: null,
+    exchange: resolved.exchange,
+    changePercent: null,
+    source: "TradingView symbol search",
+    updatedAt: new Date().toISOString()
+  };
 }
 
 async function tradingViewQuotes(symbols) {
