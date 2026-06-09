@@ -346,9 +346,11 @@
     }
     .allocation-item {
       display: grid;
-      grid-template-columns: 14px 1fr auto;
-      gap: 8px;
+      grid-template-columns: 14px minmax(max-content, 1fr) minmax(112px, 132px);
+      gap: 10px;
       align-items: center;
+      min-height: 38px;
+      padding: 6px 0;
       color: var(--muted);
       font-size: 13px;
     }
@@ -366,9 +368,10 @@
     .allocation-name {
       color: var(--text);
       font-weight: 700;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      overflow: visible;
+      text-overflow: clip;
+      white-space: normal;
+      overflow-wrap: anywhere;
     }
     .allocation-value {
       display: grid;
@@ -376,6 +379,7 @@
       gap: 2px;
       text-align: right;
       min-width: 0;
+      width: 100%;
     }
     .allocation-value strong {
       color: var(--text);
