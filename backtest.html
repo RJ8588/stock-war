@@ -121,7 +121,7 @@
     }
     .backtest-date-range {
       display: grid;
-      grid-template-columns: repeat(2, minmax(160px, 1fr));
+      grid-template-columns: repeat(3, minmax(160px, 1fr));
       gap: 10px;
       align-items: end;
       margin-bottom: 12px;
@@ -273,8 +273,18 @@
           <div class="backtest-date-range">
             <label>起始日期<input id="backtestRangeStart" type="date"></label>
             <label>結束日期<input id="backtestRangeEnd" type="date"></label>
+            <label>交易時段篩選
+              <select id="backtestSessionFilter">
+                <option value="DATE">日期紀錄</option>
+                <option>AS</option>
+                <option>TYO</option>
+                <option>London</option>
+                <option>NYAM</option>
+                <option>NYPM</option>
+              </select>
+            </label>
           </div>
-          <div class="note">選取日期區間後，下方回測績效、權益曲線與日期表格會同步套用該區間。</div>
+          <div class="note">選取日期區間與交易時段後，下方回測績效、權益曲線與日期表格會同步套用篩選；交易時段預設為日期紀錄。</div>
         </div>
       </section>
 
@@ -282,6 +292,7 @@
         <div class="panel-head">
           <h2>回測績效</h2>
           <span class="note">用停損 pips、出場 pips 與每 pip 價值換算口數、實際 R 與損益</span>
+          <button id="exportBacktestChartBtn" type="button">匯出回測績效圖檔</button>
         </div>
         <div class="panel-body">
           <div class="backtest-summary">
@@ -321,6 +332,8 @@
     const contractPipValue = symbol => Number(contractPipValues[String(symbol || "").toUpperCase()] || 0);
     const canUseServerState = location.protocol === "http:" || location.protocol === "https:";
     let backtestChart;
+    let hasRenderedBacktestChart = false;
+    let lastBacktestExportUrl = "";
     let serverStateSaveTimer = null;
     let serverStateSaveInFlight = false;
     let serverStateSaveQueued = false;
@@ -348,7 +361,7 @@
       nextTradeOrder: 1,
       deposits: [],
       symbols: {},
-      backtestSettings: { capital: 100000, riskPct: 1, riskAmount: 1000, strategyNote: "", dateStart: "", dateEnd: "" },
+      backtestSettings: { capital: 100000, riskPct: 1, riskAmount: 1000, strategyNote: "", dateStart: "", dateEnd: "", sessionFilter: "DATE" },
       backtests: [],
       nextBacktestOrder: 1,
       equity: seedEquity("2025-01")
@@ -366,13 +379,14 @@
       saved.deposits ||= [];
       saved.symbols ||= {};
       saved.equity ||= seedEquity();
-      saved.backtestSettings ||= { capital: 100000, riskPct: 1, riskAmount: 1000, strategyNote: "", dateStart: "", dateEnd: "" };
+      saved.backtestSettings ||= { capital: 100000, riskPct: 1, riskAmount: 1000, strategyNote: "", dateStart: "", dateEnd: "", sessionFilter: "DATE" };
       saved.backtestSettings.capital = Number(saved.backtestSettings.capital || 100000);
       saved.backtestSettings.riskPct = Number(saved.backtestSettings.riskPct || 1);
       saved.backtestSettings.riskAmount = Number(saved.backtestSettings.riskAmount || (saved.backtestSettings.capital * saved.backtestSettings.riskPct / 100));
       saved.backtestSettings.strategyNote ||= "";
       saved.backtestSettings.dateStart ||= "";
       saved.backtestSettings.dateEnd ||= "";
+      saved.backtestSettings.sessionFilter ||= "DATE";
       saved.backtests ||= [];
       saved.nextBacktestOrder ||= (saved.backtests.reduce((m, row) => Math.max(m, Number(row.order || 0)), 0) + 1);
       saved.backtests = saved.backtests.map((row, index) => ({ order: Number(row.order || index + 1), ...row }));
@@ -465,6 +479,7 @@
     }
     function filteredBacktests() {
       const { start, end } = normalizeBacktestRange();
+      const sessionFilter = state.backtestSettings?.sessionFilter || "DATE";
       const rows = [...(state.backtests || [])]
         .sort((a, b) => {
           const dateDiff = String(a.date || "").localeCompare(String(b.date || ""));
@@ -476,6 +491,7 @@
           if (!date) return false;
           if (start && date < start) return false;
           if (end && date > end) return false;
+          if (sessionFilter !== "DATE" && String(row.session || "") !== sessionFilter) return false;
           return true;
         });
       return rows;
@@ -496,6 +512,13 @@
       endInput.value = end || "";
       startInput.disabled = !dates.length;
       endInput.disabled = !dates.length;
+      const sessionSelect = document.getElementById("backtestSessionFilter");
+      if (sessionSelect) {
+        const selected = state.backtestSettings?.sessionFilter || "DATE";
+        const values = [...sessionSelect.options].map(option => option.value);
+        sessionSelect.value = values.includes(selected) ? selected : "DATE";
+        state.backtestSettings.sessionFilter = sessionSelect.value;
+      }
     }
     function calcBacktestRows() {
       const capital = Number(state.backtestSettings?.capital || 0);
@@ -552,6 +575,340 @@
         },
         plugins: { legend: { labels: { color: "#e7eefb" } } }
       };
+    }
+    function drawBacktestChartFallback(labels, data) {
+      const canvas = document.getElementById("backtestChart");
+      if (!canvas) return;
+      const box = canvas.getBoundingClientRect();
+      const width = Math.max(320, Math.round(box.width || canvas.clientWidth || 640));
+      const height = Math.max(220, Math.round(box.height || canvas.clientHeight || 300));
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.round(width * dpr);
+      canvas.height = Math.round(height * dpr);
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+      const ctx = canvas.getContext("2d");
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, width, height);
+      ctx.fillStyle = "#0c121b";
+      ctx.fillRect(0, 0, width, height);
+      const pad = { top: 26, right: 18, bottom: 34, left: 74 };
+      const plotW = width - pad.left - pad.right;
+      const plotH = height - pad.top - pad.bottom;
+      const values = data.map(Number).filter(Number.isFinite);
+      const min = values.length ? Math.min(...values) : 0;
+      const max = values.length ? Math.max(...values) : 1;
+      const range = max === min ? Math.max(1, Math.abs(max) * 0.08) : max - min;
+      const yMin = min - range * 0.12;
+      const yMax = max + range * 0.12;
+      const xFor = index => pad.left + (data.length <= 1 ? 0 : index / (data.length - 1) * plotW);
+      const yFor = value => pad.top + (1 - ((Number(value) - yMin) / (yMax - yMin || 1))) * plotH;
+      ctx.strokeStyle = "#1c2635";
+      ctx.lineWidth = 1;
+      ctx.fillStyle = "#91a1b8";
+      ctx.font = "12px Inter, sans-serif";
+      ctx.textAlign = "right";
+      ctx.textBaseline = "middle";
+      for (let i = 0; i <= 4; i++) {
+        const y = pad.top + (plotH / 4) * i;
+        const value = yMax - ((yMax - yMin) / 4) * i;
+        ctx.beginPath();
+        ctx.moveTo(pad.left, y);
+        ctx.lineTo(width - pad.right, y);
+        ctx.stroke();
+        ctx.fillText(money(value), pad.left - 10, y);
+      }
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      const labelIndexes = data.length <= 4 ? data.map((_, index) => index) : [0, Math.floor((data.length - 1) / 2), data.length - 1];
+      labelIndexes.forEach(index => {
+        ctx.fillText(String(labels[index] || ""), xFor(index), height - 24);
+      });
+      if (data.length) {
+        ctx.beginPath();
+        data.forEach((value, index) => {
+          const x = xFor(index);
+          const y = yFor(value);
+          if (index === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        });
+        ctx.strokeStyle = "#4aa3ff";
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        data.forEach((value, index) => {
+          ctx.beginPath();
+          ctx.arc(xFor(index), yFor(value), 3.5, 0, Math.PI * 2);
+          ctx.fillStyle = "#4aa3ff";
+          ctx.fill();
+        });
+      }
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+      ctx.fillStyle = "#e7eefb";
+      ctx.font = "700 13px Inter, sans-serif";
+      ctx.fillText("回測權益曲線", pad.left, 8);
+      hasRenderedBacktestChart = true;
+    }
+    function setBacktestExportButton(text, disabled = false) {
+      const btn = document.getElementById("exportBacktestChartBtn");
+      if (!btn) return;
+      btn.textContent = text;
+      btn.disabled = disabled;
+    }
+    function downloadBlob(blob, fileName) {
+      if (lastBacktestExportUrl) URL.revokeObjectURL(lastBacktestExportUrl);
+      lastBacktestExportUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = lastBacktestExportUrl;
+      link.download = fileName;
+      link.target = "_blank";
+      link.rel = "noopener";
+      link.style.display = "none";
+      document.body.appendChild(link);
+      setBacktestExportButton("圖檔已產生");
+      try {
+        link.click();
+      } catch (err) {
+        window.open(lastBacktestExportUrl, "_blank", "noopener");
+      } finally {
+        link.remove();
+      }
+      setTimeout(() => setBacktestExportButton("匯出回測績效圖檔"), 1800);
+    }
+    function exportBacktestChartPng() {
+      const canvas = document.getElementById("backtestChart");
+      if (!canvas || !hasRenderedBacktestChart) {
+        alert("目前沒有可匯出的回測績效圖檔。");
+        return;
+      }
+      const settings = state.backtestSettings || {};
+      const session = settings.sessionFilter && settings.sessionFilter !== "DATE" ? settings.sessionFilter : "日期紀錄";
+      const start = settings.dateStart || "全部";
+      const end = settings.dateEnd || "全部";
+      const safeSession = String(session).replace(/[\\/:*?"<>|]/g, "-");
+      const fileName = `回測績效_${start}_${end}_${safeSession}.png`;
+      const exportCanvas = document.createElement("canvas");
+      exportCanvas.width = canvas.width;
+      exportCanvas.height = canvas.height;
+      const ctx = exportCanvas.getContext("2d");
+      ctx.fillStyle = "#0c121b";
+      ctx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+      ctx.drawImage(canvas, 0, 0);
+      exportCanvas.toBlob(blob => {
+        if (!blob) {
+          alert("圖檔匯出失敗，請稍後再試。");
+          return;
+        }
+        downloadBlob(blob, fileName);
+      }, "image/png");
+    }
+    function syncBacktestTableInputs() {
+      document.querySelectorAll("[data-backtest][data-field]").forEach(el => {
+        const row = (state.backtests || []).find(x => x.id === el.dataset.backtest);
+        if (!row) return;
+        row[el.dataset.field] = el.value;
+      });
+      save();
+    }
+    function fitText(ctx, text, maxWidth) {
+      const value = String(text ?? "");
+      if (ctx.measureText(value).width <= maxWidth) return value;
+      let output = value;
+      while (output.length > 0 && ctx.measureText(`${output}...`).width > maxWidth) {
+        output = output.slice(0, -1);
+      }
+      return output ? `${output}...` : "";
+    }
+    function wrapCanvasText(ctx, text, maxWidth) {
+      const value = String(text ?? "");
+      if (!value) return [""];
+      const lines = [];
+      value.split(/\r?\n/).forEach(paragraph => {
+        let line = "";
+        [...paragraph].forEach(char => {
+          const next = line + char;
+          if (line && ctx.measureText(next).width > maxWidth) {
+            lines.push(line);
+            line = char;
+          } else {
+            line = next;
+          }
+        });
+        lines.push(line);
+      });
+      return lines;
+    }
+    function getBacktestNoteTextarea(rowId) {
+      return [...document.querySelectorAll("[data-backtest][data-field='note']")].find(el => el.dataset.backtest === rowId);
+    }
+    function drawWrappedCanvasText(ctx, lines, x, y, lineHeight, maxLines) {
+      const visibleLines = maxLines ? lines.slice(0, maxLines) : lines;
+      visibleLines.forEach((line, index) => {
+        ctx.fillText(line, x, y + index * lineHeight);
+      });
+    }
+    function exportBacktestPerformancePng() {
+      const chartCanvas = document.getElementById("backtestChart");
+      if (!chartCanvas || !hasRenderedBacktestChart) {
+        alert("目前沒有可匯出的回測績效圖檔。");
+        return;
+      }
+      setBacktestExportButton("產生中...", true);
+      syncBacktestTableInputs();
+      const rows = calcBacktestRows();
+      const metrics = calcBacktestMetrics(rows);
+      const settings = state.backtestSettings || {};
+      const session = settings.sessionFilter && settings.sessionFilter !== "DATE" ? settings.sessionFilter : "日期紀錄";
+      const start = settings.dateStart || "全部";
+      const end = settings.dateEnd || "全部";
+      const width = 1200;
+      const margin = 32;
+      const chartY = 176;
+      const chartHeight = 360;
+      const tableTopGap = 28;
+      const tableY = chartY + chartHeight + tableTopGap;
+      const rowHeight = 34;
+      const tableHeaderHeight = 34;
+      const columns = [
+        ["日期", 92],
+        ["商品", 54],
+        ["方向", 62],
+        ["時段", 70],
+        ["進場", 76],
+        ["停損", 60],
+        ["目標", 60],
+        ["出場", 60],
+        ["口數", 50],
+        ["手續費", 70],
+        ["R倍數", 82],
+        ["損益", 92],
+        ["備註", width - margin * 2 - 828]
+      ];
+      const noteColumnWidth = columns[columns.length - 1][1];
+      const measureCanvas = document.createElement("canvas");
+      const measureCtx = measureCanvas.getContext("2d");
+      measureCtx.font = "12px Inter, sans-serif";
+      const noteLineHeight = 16;
+      const rowLayouts = rows.map(row => {
+        const textarea = getBacktestNoteTextarea(row.id);
+        const textareaHeight = textarea ? Math.ceil(textarea.getBoundingClientRect().height) : 0;
+        const noteLines = wrapCanvasText(measureCtx, row.note || "", noteColumnWidth - 18);
+        const noteHeight = noteLines.length * noteLineHeight + 18;
+        return { row, noteLines, height: Math.max(rowHeight, noteHeight, textareaHeight + 6) };
+      });
+      const bodyHeight = rows.length ? rowLayouts.reduce((sum, layout) => sum + layout.height, 0) : rowHeight;
+      const height = tableY + 24 + tableHeaderHeight + bodyHeight + 42;
+      const scale = 2;
+      const exportCanvas = document.createElement("canvas");
+      exportCanvas.width = width * scale;
+      exportCanvas.height = height * scale;
+      const ctx = exportCanvas.getContext("2d");
+      ctx.scale(scale, scale);
+      ctx.fillStyle = "#080b10";
+      ctx.fillRect(0, 0, width, height);
+      ctx.fillStyle = "#e7eefb";
+      ctx.font = "800 28px Inter, sans-serif";
+      ctx.fillText("回測績效", margin, 42);
+      ctx.fillStyle = "#91a1b8";
+      ctx.font = "14px Inter, sans-serif";
+      ctx.fillText(`資料區間：${start} ～ ${end} ｜ 交易時段：${session} ｜ 匯出日期：${new Date().toISOString().slice(0, 10)}`, margin, 70);
+      const kpis = [
+        ["總損益", `${money(metrics.totalPnl)} (${pctFmt.format(metrics.ret)}%)`, metrics.totalPnl],
+        ["交易筆數", String(metrics.count), 0],
+        ["勝率", `${pctFmt.format(metrics.winRate)}%`, metrics.winRate - 50],
+        ["Profit Factor", Number.isFinite(metrics.profitFactor) ? pctFmt.format(metrics.profitFactor) : "∞", metrics.profitFactor - 1],
+        ["平均 R", metrics.avgR.toFixed(2), metrics.avgR],
+        ["最大回撤", `${pctFmt.format(metrics.maxDd)}%`, metrics.maxDd]
+      ];
+      const cardGap = 10;
+      const cardWidth = (width - margin * 2 - cardGap * (kpis.length - 1)) / kpis.length;
+      kpis.forEach(([label, value, signal], index) => {
+        const x = margin + index * (cardWidth + cardGap);
+        ctx.fillStyle = "#101722";
+        ctx.strokeStyle = "#1f2a3a";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(x, 88, cardWidth, 62, 8);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = "#91a1b8";
+        ctx.font = "12px Inter, sans-serif";
+        ctx.fillText(label, x + 12, 110);
+        ctx.fillStyle = Number(signal || 0) > 0 ? "#2fd0a5" : Number(signal || 0) < 0 ? "#ff6b7a" : "#e7eefb";
+        ctx.font = "800 18px Inter, sans-serif";
+        ctx.fillText(fitText(ctx, value, cardWidth - 24), x + 12, 136);
+      });
+      ctx.fillStyle = "#0c121b";
+      ctx.strokeStyle = "#1f2a3a";
+      ctx.beginPath();
+      ctx.roundRect(margin, chartY, width - margin * 2, chartHeight, 8);
+      ctx.fill();
+      ctx.stroke();
+      ctx.drawImage(chartCanvas, margin + 14, chartY + 14, width - margin * 2 - 28, chartHeight - 28);
+      ctx.fillStyle = "#e7eefb";
+      ctx.font = "800 20px Inter, sans-serif";
+      ctx.fillText("回測紀錄", margin, tableY);
+      let y = tableY + 24;
+      let x = margin;
+      ctx.fillStyle = "#131c29";
+      ctx.fillRect(margin, y, width - margin * 2, tableHeaderHeight);
+      ctx.fillStyle = "#91a1b8";
+      ctx.font = "700 13px Inter, sans-serif";
+      columns.forEach(([label, colWidth]) => {
+        ctx.fillText(label, x + 10, y + 22);
+        x += colWidth;
+      });
+      y += tableHeaderHeight;
+      if (!rows.length) {
+        ctx.fillStyle = "#0c121b";
+        ctx.fillRect(margin, y, width - margin * 2, rowHeight);
+        ctx.fillStyle = "#91a1b8";
+        ctx.font = "14px Inter, sans-serif";
+        ctx.fillText("尚無回測紀錄。", margin + 10, y + 22);
+      } else {
+        rowLayouts.forEach(({ row, noteLines, height: currentRowHeight }, index) => {
+          x = margin;
+          ctx.fillStyle = index % 2 ? "#0e1520" : "#0c121b";
+          ctx.fillRect(margin, y, width - margin * 2, currentRowHeight);
+          const values = [
+            row.date || "",
+            row.symbol || "",
+            row.direction || "",
+            row.session || "",
+            money(row.entry),
+            row.stopPips,
+            row.targetPips,
+            row.exitPips,
+            row.shares,
+            money(row.fees),
+            `${row.actualR.toFixed(2)}R`,
+            money(row.pnl),
+            row.note || ""
+          ];
+          values.forEach((value, colIndex) => {
+            const colWidth = columns[colIndex][1];
+            ctx.fillStyle = colIndex === 11 ? (row.pnl >= 0 ? "#2fd0a5" : "#ff6b7a") : "#e7eefb";
+            ctx.font = colIndex === 11 ? "700 13px Inter, sans-serif" : "12px Inter, sans-serif";
+            if (colIndex === 12) {
+              drawWrappedCanvasText(ctx, noteLines, x + 10, y + 20, noteLineHeight);
+            } else {
+              ctx.fillText(fitText(ctx, value, colWidth - 18), x + 10, y + 22);
+            }
+            x += colWidth;
+          });
+          y += currentRowHeight;
+        });
+      }
+      const safeSession = String(session).replace(/[\\/:*?"<>|]/g, "-");
+      const fileName = `回測績效_${start}_${end}_${safeSession}.png`;
+      exportCanvas.toBlob(blob => {
+        if (!blob) {
+          setBacktestExportButton("匯出回測績效圖檔");
+          alert("圖檔匯出失敗，請稍後再試。");
+          return;
+        }
+        downloadBlob(blob, fileName);
+      }, "image/png");
     }
     function currentRiskPerContract() {
       const symbol = document.getElementById("btSymbol")?.value || "MNQ";
@@ -618,11 +975,12 @@
           <div class="label">${label}</div>
           <div class="value ${Number(signal || 0) > 0 ? "good" : Number(signal || 0) < 0 ? "bad" : ""}">${value}</div>
         </div>`).join("");
+      const sessionLabel = settings.sessionFilter && settings.sessionFilter !== "DATE" ? settings.sessionFilter : "日期紀錄";
       document.getElementById("backtestRules").innerHTML = `
         <strong>回測模型</strong>
         <span>每筆風險金額 = 回測本金 × 每筆風險%。系統用停損 pips × 每 pip 價值換算整數口數；若停損風險超過本金或風險上限，會自動減少口數。</span>
         <span>平均勝 R：<strong>${m.avgWinR.toFixed(2)}</strong> ｜ 平均虧 R：<strong>${m.avgLossR.toFixed(2)}</strong> ｜ 期望值：<strong>${m.avgR.toFixed(2)}R / 筆</strong></span>
-        <span>資料區間：<strong>${range.start || "全部"} ～ ${range.end || "全部"}</strong></span>
+        <span>資料區間：<strong>${range.start || "全部"} ～ ${range.end || "全部"}</strong> ｜ 交易時段：<strong>${sessionLabel}</strong></span>
         <label>策略筆記<textarea id="backtestStrategyNote" placeholder="盤前想法、進場假設、觀察重點...">${state.backtestSettings.strategyNote || ""}</textarea></label>`;
       document.getElementById("backtestBody").innerHTML = rows.map(row => `
         <tr>
@@ -641,15 +999,23 @@
           <td class="left"><textarea data-backtest="${row.id}" data-field="note" placeholder="備註">${row.note || ""}</textarea></td>
           <td><button class="danger" data-delete-backtest="${row.id}">刪除</button></td>
         </tr>`).join("") || `<tr><td colspan="14" class="left muted">尚無回測紀錄，先新增一筆回測。</td></tr>`;
-      if (typeof Chart === "undefined") return;
-      if (backtestChart) backtestChart.destroy();
       const labels = ["Start", ...rows.map(row => row.date || "")];
       const data = [Number(settings.capital || 0), ...rows.map(row => row.equity)];
+      if (typeof Chart === "undefined") {
+        if (backtestChart) {
+          backtestChart.destroy();
+          backtestChart = null;
+        }
+        drawBacktestChartFallback(labels, data);
+        return;
+      }
+      if (backtestChart) backtestChart.destroy();
       backtestChart = new Chart(document.getElementById("backtestChart"), {
         type: "line",
         data: { labels, datasets: [{ label: "回測權益曲線", data, borderColor: "#4aa3ff", backgroundColor: "rgba(74,163,255,.14)", fill: true, tension: .28 }] },
         options: chartOpts()
       });
+      hasRenderedBacktestChart = true;
     }
     function updateBacktestSettings(e) {
       const map = {
@@ -693,6 +1059,12 @@
           render();
         });
       });
+      document.getElementById("backtestSessionFilter").addEventListener("change", e => {
+        state.backtestSettings ||= {};
+        state.backtestSettings.sessionFilter = e.target.value || "DATE";
+        render();
+      });
+      document.getElementById("exportBacktestChartBtn").addEventListener("click", exportBacktestPerformancePng);
       document.getElementById("btDate").valueAsDate = new Date();
       const refreshFeeInput = () => {
         document.getElementById("btFees").value = contractRoundTripFee(document.getElementById("btSymbol").value).toFixed(2);
@@ -710,12 +1082,15 @@
       document.getElementById("backtestForm").addEventListener("submit", e => {
         e.preventDefault();
         const symbol = document.getElementById("btSymbol").value.toUpperCase().trim();
-        const entry = Number(document.getElementById("btEntry").value || 0);
-        const stop = Number(document.getElementById("btStop").value || 0);
-        const exit = Number(document.getElementById("btExit").value || 0);
-        if (!symbol || !entry || !stop || !exit) return;
+        const entryRaw = document.getElementById("btEntry").value.trim();
+        const stopRaw = document.getElementById("btStop").value.trim();
+        const exitRaw = document.getElementById("btExit").value.trim();
+        const entry = Number(entryRaw || 0);
+        const stop = Number(stopRaw || 0);
+        const exit = Number(exitRaw || 0);
+        if (!symbol || !entryRaw || !stopRaw || !exitRaw || !entry || !stop) return;
         state.backtests ||= [];
-        state.backtests.push({
+        const newRow = {
           id: uid(),
           order: Number(state.nextBacktestOrder || 1),
           date: document.getElementById("btDate").value,
@@ -729,8 +1104,17 @@
           exit,
           fees: contractRoundTripFee(symbol),
           note: document.getElementById("btNote").value
-        });
+        };
+        state.backtests.push(newRow);
         state.nextBacktestOrder = Number(state.nextBacktestOrder || 1) + 1;
+        state.backtestSettings ||= {};
+        if (newRow.date) {
+          if (!state.backtestSettings.dateStart || newRow.date < state.backtestSettings.dateStart) state.backtestSettings.dateStart = newRow.date;
+          if (!state.backtestSettings.dateEnd || newRow.date > state.backtestSettings.dateEnd) state.backtestSettings.dateEnd = newRow.date;
+        }
+        if (state.backtestSettings.sessionFilter && state.backtestSettings.sessionFilter !== "DATE" && state.backtestSettings.sessionFilter !== newRow.session) {
+          state.backtestSettings.sessionFilter = "DATE";
+        }
         e.target.reset();
         document.getElementById("btDate").valueAsDate = new Date();
         document.getElementById("btSymbol").value = "MNQ";
