@@ -330,6 +330,14 @@
     const contractRoundTripFee = symbol => Number(contractRoundTripFees[String(symbol || "").toUpperCase()] || 0);
     const contractPipValues = { MNQ: 2, NQ: 20, ES: 50, MES: 5 };
     const contractPipValue = symbol => Number(contractPipValues[String(symbol || "").toUpperCase()] || 0);
+    const sessionSortOrder = { AS: 1, TYO: 2, London: 3, NYAM: 4, NYPM: 5 };
+    function compareBacktests(a, b) {
+      const dateDiff = String(a.date || "").localeCompare(String(b.date || ""));
+      if (dateDiff) return dateDiff;
+      const sessionDiff = Number(sessionSortOrder[a.session] || 99) - Number(sessionSortOrder[b.session] || 99);
+      if (sessionDiff) return sessionDiff;
+      return Number(a.order || 0) - Number(b.order || 0);
+    }
     const canUseServerState = location.protocol === "http:" || location.protocol === "https:";
     let backtestChart;
     let hasRenderedBacktestChart = false;
@@ -481,11 +489,7 @@
       const { start, end } = normalizeBacktestRange();
       const sessionFilter = state.backtestSettings?.sessionFilter || "DATE";
       const rows = [...(state.backtests || [])]
-        .sort((a, b) => {
-          const dateDiff = String(a.date || "").localeCompare(String(b.date || ""));
-          if (dateDiff) return dateDiff;
-          return Number(a.order || 0) - Number(b.order || 0);
-        })
+        .sort(compareBacktests)
         .filter(row => {
           const date = String(row.date || "").slice(0, 10);
           if (!date) return false;
@@ -816,9 +820,9 @@
         ["總損益", `${money(metrics.totalPnl)} (${pctFmt.format(metrics.ret)}%)`, metrics.totalPnl],
         ["交易筆數", String(metrics.count), 0],
         ["勝率", `${pctFmt.format(metrics.winRate)}%`, metrics.winRate - 50],
-        ["Profit Factor", Number.isFinite(metrics.profitFactor) ? pctFmt.format(metrics.profitFactor) : "∞", metrics.profitFactor - 1],
-        ["平均 R", metrics.avgR.toFixed(2), metrics.avgR],
-        ["最大回撤", `${pctFmt.format(metrics.maxDd)}%`, metrics.maxDd]
+        ["獲利因子", Number.isFinite(metrics.profitFactor) ? pctFmt.format(metrics.profitFactor) : "∞", metrics.profitFactor - 1],
+        ["期望值", metrics.avgR.toFixed(2), metrics.avgR],
+        ["平均R", metrics.avgWinR.toFixed(2), metrics.avgWinR]
       ];
       const cardGap = 10;
       const cardWidth = (width - margin * 2 - cardGap * (kpis.length - 1)) / kpis.length;
@@ -966,9 +970,9 @@
         ["回測損益", `${money(m.totalPnl)} (${pctFmt.format(m.ret)}%)`, m.totalPnl],
         ["交易筆數", `${m.count}`, 0],
         ["勝率", `${pctFmt.format(m.winRate)}%`, m.winRate - 50],
-        ["Profit Factor", pf, m.profitFactor - 1],
-        ["平均 R", m.avgR.toFixed(2), m.avgR],
-        ["最大回撤", `${pctFmt.format(m.maxDd)}%`, m.maxDd]
+        ["獲利因子", pf, m.profitFactor - 1],
+        ["期望值", m.avgR.toFixed(2), m.avgR],
+        ["平均R", m.avgWinR.toFixed(2), m.avgWinR]
       ];
       document.getElementById("backtestKpis").innerHTML = items.map(([label, value, signal]) => `
         <div class="backtest-kpi">
@@ -1085,6 +1089,7 @@
         const entryRaw = document.getElementById("btEntry").value.trim();
         const stopRaw = document.getElementById("btStop").value.trim();
         const exitRaw = document.getElementById("btExit").value.trim();
+        const tradeDate = document.getElementById("btDate").value;
         const entry = Number(entryRaw || 0);
         const stop = Number(stopRaw || 0);
         const exit = Number(exitRaw || 0);
@@ -1093,7 +1098,7 @@
         const newRow = {
           id: uid(),
           order: Number(state.nextBacktestOrder || 1),
-          date: document.getElementById("btDate").value,
+          date: tradeDate,
           symbol,
           direction: document.getElementById("btDirection").value,
           session: document.getElementById("btSession").value,
@@ -1116,7 +1121,7 @@
           state.backtestSettings.sessionFilter = "DATE";
         }
         e.target.reset();
-        document.getElementById("btDate").valueAsDate = new Date();
+        document.getElementById("btDate").value = tradeDate;
         document.getElementById("btSymbol").value = "MNQ";
         refreshFeeInput();
         syncContractsFromRisk();

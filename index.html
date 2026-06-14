@@ -866,6 +866,14 @@
     const contractRoundTripFee = symbol => Number(contractRoundTripFees[String(symbol || "").toUpperCase()] || 0);
     const contractPipValues = { MNQ: 2, NQ: 20, ES: 50, MES: 5 };
     const contractPipValue = symbol => Number(contractPipValues[String(symbol || "").toUpperCase()] || 0);
+    const sessionSortOrder = { AS: 1, TYO: 2, London: 3, NYAM: 4, NYPM: 5 };
+    function compareBacktests(a, b) {
+      const dateDiff = String(a.date || "").localeCompare(String(b.date || ""));
+      if (dateDiff) return dateDiff;
+      const sessionDiff = Number(sessionSortOrder[a.session] || 99) - Number(sessionSortOrder[b.session] || 99);
+      if (sessionDiff) return sessionDiff;
+      return Number(a.order || 0) - Number(b.order || 0);
+    }
     const BIL_SOURCE_URL = "https://www.ssga.com/us/en/intermediary/etfs/state-street-spdr-bloomberg-1-3-month-t-bill-etf-bil";
     const SGOV_SOURCE_URL = "https://www.ishares.com/us/products/314116/ishares-0-3-month-treasury-bond-etf";
     const yieldSnapshots = {
@@ -1252,7 +1260,7 @@
       return { invested, baseCapital, deposits, cash, buyAmount, sellAmount, cost, market, unreal, realized, equity, totalPnl, ret, cagr, mdd };
     }
     function filteredBacktests() {
-      const rows = [...(state.backtests || [])].sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")));
+      const rows = [...(state.backtests || [])].sort(compareBacktests);
       return rows;
     }
     function calcBacktestRows() {
@@ -1603,9 +1611,9 @@
         ["回測損益", `${money(m.totalPnl)} (${pctFmt.format(m.ret)}%)`, m.totalPnl],
         ["交易筆數", `${m.count}`, 0],
         ["勝率", `${pctFmt.format(m.winRate)}%`, m.winRate - 50],
-        ["Profit Factor", pf, m.profitFactor - 1],
-        ["平均 R", m.avgR.toFixed(2), m.avgR],
-        ["最大回撤", `${pctFmt.format(m.maxDd)}%`, m.maxDd]
+        ["獲利因子", pf, m.profitFactor - 1],
+        ["期望值", m.avgR.toFixed(2), m.avgR],
+        ["平均R", m.avgWinR.toFixed(2), m.avgWinR]
       ];
       document.getElementById("backtestKpis").innerHTML = items.map(([label, value, signal]) => `
         <div class="backtest-kpi">
@@ -2311,11 +2319,12 @@
         const entry = Number(document.getElementById("btEntry").value || 0);
         const stop = Number(document.getElementById("btStop").value || 0);
         const exit = Number(document.getElementById("btExit").value || 0);
+        const tradeDate = document.getElementById("btDate").value;
         if (!symbol || !entry || !stop || !exit || entry === stop) return;
         state.backtests ||= [];
         state.backtests.push({
           id: uid(),
-          date: document.getElementById("btDate").value,
+          date: tradeDate,
           symbol,
           direction: document.getElementById("btDirection").value,
           entry,
@@ -2326,7 +2335,7 @@
           note: document.getElementById("btNote").value
         });
         e.target.reset();
-        document.getElementById("btDate").valueAsDate = new Date();
+        document.getElementById("btDate").value = tradeDate;
         render();
       });
       document.getElementById("applyEquityStartBtn").addEventListener("click", () => {
