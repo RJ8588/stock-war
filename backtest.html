@@ -331,6 +331,15 @@
     const contractPipValues = { MNQ: 2, NQ: 20, ES: 50, MES: 5 };
     const contractPipValue = symbol => Number(contractPipValues[String(symbol || "").toUpperCase()] || 0);
     const sessionSortOrder = { AS: 1, TYO: 2, London: 3, NYAM: 4, NYPM: 5 };
+    function normalizeBacktestRiskDollars(row, fallbackRiskDollars = 0) {
+      const savedRisk = Number(row.riskDollars || row.riskAmount || 0);
+      if (savedRisk > 0) return savedRisk;
+      const contracts = Math.floor(Number(row.contracts || 0));
+      const stopPips = Math.abs(Number(row.stop || 0));
+      const pipValue = contractPipValue(row.symbol);
+      const effectiveRisk = contracts > 0 && stopPips > 0 && pipValue > 0 ? contracts * stopPips * pipValue : 0;
+      return effectiveRisk > 0 ? effectiveRisk : Number(fallbackRiskDollars || 0);
+    }
     function compareBacktests(a, b) {
       const dateDiff = String(a.date || "").localeCompare(String(b.date || ""));
       if (dateDiff) return dateDiff;
@@ -397,7 +406,11 @@
       saved.backtestSettings.sessionFilter ||= "DATE";
       saved.backtests ||= [];
       saved.nextBacktestOrder ||= (saved.backtests.reduce((m, row) => Math.max(m, Number(row.order || 0)), 0) + 1);
-      saved.backtests = saved.backtests.map((row, index) => ({ order: Number(row.order || index + 1), ...row }));
+      saved.backtests = saved.backtests.map((row, index) => {
+        const normalized = { order: Number(row.order || index + 1), ...row };
+        normalized.riskDollars = normalizeBacktestRiskDollars(normalized, saved.backtestSettings.riskAmount);
+        return normalized;
+      });
       return saved;
     }
     function loadLocalState() {
@@ -537,8 +550,9 @@
         const pipValue = contractPipValue(row.symbol);
         const riskPerContract = stopPips * pipValue;
         const savedContracts = Math.floor(Number(row.contracts || 0));
+        const rowRiskDollars = normalizeBacktestRiskDollars(row, riskDollars);
         const rawContracts = riskPerContract > 0
-          ? (savedContracts > 0 ? savedContracts : Math.floor(riskDollars / riskPerContract))
+          ? (savedContracts > 0 ? savedContracts : Math.floor(rowRiskDollars / riskPerContract))
           : 0;
         const capitalCapContracts = riskPerContract > 0 ? Math.floor(capital / riskPerContract) : 0;
         const shares = Math.max(0, Math.min(rawContracts, capitalCapContracts));
@@ -547,11 +561,11 @@
         const plannedR = stopPips > 0 ? targetPips / stopPips : 0;
         const gross = exitPips * pipValue * shares;
         const pnl = gross - fees;
-        const actualR = riskDollars > 0 ? pnl / riskDollars : 0;
+        const actualR = rowRiskDollars > 0 ? pnl / rowRiskDollars : 0;
         equity += pnl;
         peak = Math.max(peak, equity);
         const drawdown = peak > 0 ? (equity - peak) / peak * 100 : 0;
-        return { ...row, index: index + 1, fees, pipValue, stopPips, targetPips, exitPips, riskDollars, riskPerContract, effectiveRisk, shares, plannedR, actualR, pnl, equity, drawdown };
+        return { ...row, index: index + 1, fees, pipValue, stopPips, targetPips, exitPips, riskDollars: rowRiskDollars, riskPerContract, effectiveRisk, shares, plannedR, actualR, pnl, equity, drawdown };
       });
     }
     function calcBacktestMetrics(rows) {
@@ -1105,6 +1119,7 @@
           entry,
           stop,
           contracts: Number(document.getElementById("btContracts").value || 0),
+          riskDollars: Number(state.backtestSettings?.riskAmount || 0),
           target: Number(document.getElementById("btTarget").value || 0),
           exit,
           fees: contractRoundTripFee(symbol),
