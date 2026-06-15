@@ -866,7 +866,7 @@
     const contractRoundTripFee = symbol => Number(contractRoundTripFees[String(symbol || "").toUpperCase()] || 0);
     const contractPipValues = { MNQ: 2, NQ: 20, ES: 50, MES: 5 };
     const contractPipValue = symbol => Number(contractPipValues[String(symbol || "").toUpperCase()] || 0);
-    const sessionSortOrder = { AS: 1, TYO: 2, London: 3, NYAM: 4, NYPM: 5 };
+    const sessionSortOrder = { London: 1, NYAM: 2, NYPM: 3, AS: 4, TYO: 5 };
     function normalizeBacktestRiskDollars(row, fallbackRiskDollars = 0) {
       const savedRisk = Number(row.riskDollars || row.riskAmount || 0);
       if (savedRisk > 0) return savedRisk;
