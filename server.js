@@ -293,22 +293,36 @@ async function tradingViewQuote(symbol) {
     ...quoteExchangeCandidates(unique)
   ].filter(Boolean).map(normalizeTradingViewExchange))];
   for (const exchange of exchanges) {
-    for (const domain of ["www", "tw"]) {
-      try {
-        const html = await textFrom(tradingViewSymbolUrl(exchange, unique, domain));
-        const price = extractTradingViewQuote(html, unique);
-        if (!price) continue;
+    try {
+      const response = await fetch("https://scanner.tradingview.com/america/scan", {
+        method: "POST",
+        headers: {
+          accept: "application/json,text/plain,*/*",
+          "content-type": "application/json",
+          "user-agent": "Mozilla/5.0"
+        },
+        body: JSON.stringify({
+          symbols: { tickers: [`${exchange}:${unique}`] },
+          columns: ["close", "change", "change_abs", "name", "currency"]
+        }),
+        cache: "no-store"
+      });
+      if (!response.ok) continue;
+      const payload = await response.json();
+      const row = Array.isArray(payload?.data) ? payload.data.find(item => String(item?.s || "").split(":").pop() === unique) : null;
+      const price = Number(row?.d?.[0] ?? 0);
+      if (Number.isFinite(price) && price > 0) {
         return {
           symbol: unique,
           price,
           exchange: normalizeTradingViewExchange(exchange),
-          changePercent: null,
-          source: `TradingView official symbol page (${domain}.${exchange})`,
+          changePercent: Number(row?.d?.[1] ?? 0),
+          source: `TradingView scanner (${exchange})`,
           updatedAt: new Date().toISOString()
         };
-      } catch {
-        continue;
       }
+    } catch {
+      continue;
     }
   }
   if (!resolved?.exchange) return null;
