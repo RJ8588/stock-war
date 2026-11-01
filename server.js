@@ -7,6 +7,19 @@ const port = Number(process.env.PORT || 4173);
 const host = process.env.HOST || "0.0.0.0";
 const stateFile = path.join(root, ".data", "dashboard-state.json");
 const fngCacheFile = path.join(root, ".data", "cnn-fng-cache.json");
+const isReplitProduction = Boolean(process.env.REPL_ID) && !process.env.REPLIT_DEV_DOMAIN;
+const isProduction = process.env.NODE_ENV === "production" || isReplitProduction;
+let stateDatabase = null;
+let stateDatabaseReady = null;
+if (process.env.DATABASE_URL) {
+  const { Pool } = require("pg");
+  stateDatabase = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: isProduction ? { rejectUnauthorized: false } : false
+  });
+} else if (isReplitProduction) {
+  throw new Error("Persistent Replit PostgreSQL is required in production. Configure DATABASE_URL before publishing.");
+}
 let fearGreedMemoryCache = null;
 let fearGreedMemoryCachedAt = 0;
 let fearGreedInFlight = null;
@@ -50,6 +63,48 @@ async function readJsonFile(filePath) {
 async function writeJsonFile(filePath, value) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   await fs.writeFile(filePath, JSON.stringify(value, null, 2), "utf8");
+}
+
+async function ensureStateDatabase() {
+  if (!stateDatabase) return;
+  if (!stateDatabaseReady) {
+    stateDatabaseReady = stateDatabase.query(`
+      CREATE TABLE IF NOT EXISTS dashboard_state (
+        id SMALLINT PRIMARY KEY CHECK (id = 1),
+        payload JSONB NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+  }
+  await stateDatabaseReady;
+}
+
+async function readDashboardState() {
+  if (!stateDatabase) return readJsonFile(stateFile);
+  await ensureStateDatabase();
+  const result = await stateDatabase.query("SELECT payload FROM dashboard_state WHERE id = 1");
+  if (result.rows[0]) return result.rows[0].payload;
+
+  // Migrate the old ignored JSON file once, when it still exists on the Replit workspace.
+  const legacyState = await readJsonFile(stateFile);
+  if (!legacyState) return null;
+  await stateDatabase.query(
+    "INSERT INTO dashboard_state (id, payload) VALUES (1, $1::jsonb) ON CONFLICT (id) DO NOTHING",
+    [JSON.stringify(legacyState)]
+  );
+  const migrated = await stateDatabase.query("SELECT payload FROM dashboard_state WHERE id = 1");
+  return migrated.rows[0]?.payload || legacyState;
+}
+
+async function writeDashboardState(value) {
+  if (!stateDatabase) return writeJsonFile(stateFile, value);
+  await ensureStateDatabase();
+  await stateDatabase.query(
+    `INSERT INTO dashboard_state (id, payload, updated_at)
+     VALUES (1, $1::jsonb, NOW())
+     ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()`,
+    [JSON.stringify(value)]
+  );
 }
 
 async function readRequestBody(req) {
@@ -379,19 +434,19 @@ function send(res, status, body, contentType = "text/plain; charset=utf-8") {
   res.end(body);
 }
 
-http.createServer(async (req, res) => {
+const dashboardServer = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://127.0.0.1:${port}`);
     if (url.pathname === "/api/state") {
       if (req.method === "GET") {
-        const state = await readJsonFile(stateFile);
+        const state = await readDashboardState();
         send(res, 200, JSON.stringify({ state }), "application/json; charset=utf-8");
         return;
       }
       if (req.method === "POST") {
         const body = await readRequestBody(req);
         const parsed = JSON.parse(body || "{}");
-        await writeJsonFile(stateFile, parsed);
+        await writeDashboardState(parsed);
         send(res, 200, JSON.stringify({ ok: true }), "application/json; charset=utf-8");
         return;
       }
@@ -426,9 +481,25 @@ http.createServer(async (req, res) => {
     const data = await fs.readFile(file);
     const type = file.endsWith(".html") ? "text/html; charset=utf-8" : "application/octet-stream";
     send(res, 200, data, type);
-  } catch {
-    send(res, 404, "not found");
+  } catch (err) {
+    const notFound = err && err.code === "ENOENT";
+    send(res, notFound ? 404 : 500, notFound ? "not found" : "server error");
   }
-}).listen(port, host, () => {
-  console.log(`Dashboard running at http://localhost:${port}/`);
 });
+
+async function startServer() {
+  try {
+    await ensureStateDatabase();
+  } catch (err) {
+    console.error(`Dashboard storage initialization failed: ${String(err?.message || err)}`);
+    if (stateDatabase) await stateDatabase.end().catch(() => {});
+    process.exit(1);
+    return;
+  }
+  dashboardServer.listen(port, host, () => {
+    console.log(`Dashboard running at http://localhost:${port}/`);
+    console.log(`Dashboard state storage: ${stateDatabase ? "PostgreSQL" : "local .data file"}`);
+  });
+}
+
+startServer();

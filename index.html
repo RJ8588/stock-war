@@ -160,6 +160,9 @@
     th { color: var(--muted); font-weight: 700; background: rgba(12,18,27,.8); position: sticky; top: 0; }
     td input, td select, td textarea { min-width: 96px; padding: 7px 8px; }
     td textarea { min-width: 160px; }
+    .ratio-control { display: flex; align-items: center; justify-content: center; gap: 4px; margin-top: 6px; color: var(--muted); font-size: 11px; white-space: nowrap; }
+    .ratio-control input { width: 58px; min-width: 58px; padding: 4px 5px; text-align: right; }
+    .ratio-mobile { width: 56px; min-width: 56px; padding: 4px 5px; text-align: right; }
     .symbol { font-weight: 800; letter-spacing: .4px; }
     .pill {
       display: inline-flex;
@@ -769,7 +772,7 @@
       <section class="panel">
         <div class="panel-head">
           <h2>我的持股明細</h2>
-          <span class="note">相同股票自動合併；核心倉與動能倉固定以目前部位 20% / 80% 精準切分到小數 6 位</span>
+          <span class="note">可逐檔調整核心／動能比例；比例調整會重新分配目前持股，後續加碼沿用新比例，部分減碼仍優先扣動能倉</span>
         </div>
         <div class="panel-body">
           <div id="positionMobile" class="mobile-card"></div>
@@ -777,7 +780,7 @@
             <table>
               <thead>
                 <tr>
-                  <th class="left">股票</th><th>股數</th><th>均價</th><th>現價</th><th>總成本</th><th>市值</th><th>未實現損益</th><th>已實現損益</th><th>核心 20%</th><th>動能 80%</th><th>最大投資額</th><th>剩餘投資額</th><th class="left">備註</th>
+                  <th class="left">股票</th><th>股數</th><th>均價</th><th>現價</th><th>總成本</th><th>市值</th><th>未實現損益</th><th>已實現損益</th><th>核心倉</th><th>動能倉</th><th>最大投資額</th><th>剩餘投資額</th><th class="left">備註</th>
                 </tr>
               </thead>
               <tbody id="positionsBody"></tbody>
@@ -799,12 +802,12 @@
       <section class="panel">
         <div class="panel-head">
           <h2>交易紀錄</h2>
-          <span class="note">直接修改表格欄位即可同步重算持股與 TP Planner</span>
+          <span class="note">已實現獲利逐筆計算：每筆賣出只顯示該次賣出的獲利，買進列不顯示</span>
         </div>
         <div class="panel-body table-wrap">
           <table>
             <thead>
-              <tr><th class="left">日期</th><th>股票</th><th>方向</th><th>成交價</th><th>股數</th><th>金額</th><th>該股已實現損益</th><th class="left">備註</th><th>操作</th></tr>
+              <tr><th class="left">日期</th><th>股票</th><th>方向</th><th>成交價</th><th>股數</th><th>金額</th><th>本次賣出已實現損益</th><th class="left">備註</th><th>操作</th></tr>
             </thead>
             <tbody id="tradesBody"></tbody>
           </table>
@@ -814,7 +817,7 @@
       <section class="panel">
         <div class="panel-head">
           <h2>帳戶資產曲線</h2>
-          <span class="note">可自訂起始月份與新增任意月份；年化報酬與 MDD 由已輸入的月份計算</span>
+          <span class="note">最新月份帳戶資產以現金加目前持倉市值計算，會隨現價更新；歷史月份依已實現交易資料回推</span>
         </div>
         <div class="panel-body" id="equityExportArea">
           <div class="equity-controls">
@@ -835,7 +838,7 @@
             <div class="chart-box"><canvas id="equityChart"></canvas></div>
             <div class="table-wrap">
               <table>
-                <thead><tr><th class="left">月份</th><th>月已實現損益</th><th>年已實現損益</th><th>累積已實現損益</th><th>帳戶資產</th></tr></thead>
+                <thead><tr><th class="left">月份</th><th>月已實現損益</th><th>年已實現損益</th><th>累積已實現損益</th><th>帳戶資產（最新含持倉市值）</th></tr></thead>
                 <tbody id="equityBody"></tbody>
               </table>
             </div>
@@ -860,6 +863,10 @@
       return value.toFixed(6).replace(/\.?0+$/, "");
     };
     const money = n => "$" + fmt.format(Number(n || 0));
+    const remainingInvestment = (maxInvest, cost) => {
+      const remaining = Number(maxInvest || 0) - Number(cost || 0);
+      return money(Math.abs(remaining) < 0.005 ? 0 : remaining);
+    };
     const pct = n => (Number(n || 0) >= 0 ? "+" : "") + pctFmt.format(Number(n || 0)) + "%";
     const uid = () => Math.random().toString(36).slice(2, 10);
     const contractRoundTripFees = { MNQ: 0.5, NQ: 5, ES: 5, MES: 0.5 };
@@ -1024,14 +1031,52 @@
       saved.settings.equityYearFilter ||= "ALL";
       saved.settings.yieldRates ||= {};
       saved.trades ||= [];
+      saved.allocations ||= [];
+      saved.symbols ||= {};
       saved.settings.equityStartMonth ||= (saved.trades.map(t => t.date).filter(Boolean).sort()[0] || "").slice(0, 7);
       for (const [symbol, snapshot] of Object.entries(yieldSnapshots)) {
         if (!saved.settings.yieldRates[symbol]) saved.settings.yieldRates[symbol] = snapshot;
       }
       saved.trades = saved.trades.map((t, idx) => ({ ...t, order: Number.isFinite(Number(t.order)) ? Number(t.order) : idx + 1 }));
-      saved.nextTradeOrder ||= (saved.trades.reduce((m, t) => Math.max(m, Number(t.order || 0)), 0) + 1);
+      // Rebuild allocation history so manual ratio changes persist as of their order.
+      const buckets = {};
+      const allocationEvents = saved.allocations.map(event => ({ ...event, type: "allocation", order: Number(event.order || 0) }));
+      const tradeEvents = saved.trades.map(trade => ({ trade, type: "trade", order: Number(trade.order || 0) }));
+      for (const event of [...allocationEvents, ...tradeEvents].sort((a, b) => a.order - b.order || (a.type === b.type ? 0 : a.type === "allocation" ? -1 : 1))) {
+        if (event.type === "allocation") {
+          const symbol = String(event.symbol || "").toUpperCase().trim();
+          if (!symbol) continue;
+          const lot = buckets[symbol] ||= { core: 0, momentum: 0 };
+          const ratio = Math.max(0, Math.min(100, Number(event.coreRatio ?? 20))) / 100;
+          const total = lot.core + lot.momentum;
+          lot.core = total * ratio;
+          lot.momentum = total - lot.core;
+          continue;
+        }
+        const trade = event.trade;
+        const symbol = String(trade.symbol || "").toUpperCase().trim();
+        if (!symbol) continue;
+        const lot = buckets[symbol] ||= { core: 0, momentum: 0 };
+        const shares = Math.max(0, Number(trade.shares || 0));
+        if (trade.side !== "SELL") {
+          trade.bucket = "split";
+          trade.coreRatio = Math.max(0, Math.min(100, Number(trade.coreRatio ?? 20)));
+        }
+        else if (!trade.bucket) trade.bucket = shares >= lot.core + lot.momentum - 0.0000005 ? "all" : "momentum";
+        if (trade.side === "SELL") {
+          if (trade.bucket === "all") { lot.core = 0; lot.momentum = 0; }
+          else lot.momentum = Math.max(0, lot.momentum - shares);
+        } else if (trade.bucket === "split") {
+          lot.core += shares * trade.coreRatio / 100;
+          lot.momentum += shares * (1 - trade.coreRatio / 100);
+        } else if (trade.bucket === "core") lot.core += shares;
+        else lot.momentum += shares;
+      }
+      saved.nextTradeOrder ||= Math.max(
+        saved.trades.reduce((m, t) => Math.max(m, Number(t.order || 0)), 0),
+        saved.allocations.reduce((m, event) => Math.max(m, Number(event.order || 0)), 0)
+      ) + 1;
       saved.deposits ||= [];
-      saved.symbols ||= {};
       saved.backtestSettings ||= { capital: 100000, riskPct: 1, riskAmount: 1000, strategyNote: "" };
       saved.backtestSettings.capital = Number(saved.backtestSettings.capital || 100000);
       saved.backtestSettings.riskPct = Number(saved.backtestSettings.riskPct || 1);
@@ -1197,33 +1242,65 @@
     function ensureSymbol(symbol) {
       const s = symbol.toUpperCase().trim();
       if (!state.symbols[s]) {
-        state.symbols[s] = { currentPrice: 0, maxInvest: 0, note: "", high: 0, low: 0, tp: defaultTp() };
+        state.symbols[s] = { currentPrice: 0, maxInvest: 0, note: "", high: 0, low: 0, coreRatio: 20, tp: defaultTp() };
       }
+      if (!Number.isFinite(Number(state.symbols[s].coreRatio))) state.symbols[s].coreRatio = 20;
       state.symbols[s].tp ||= defaultTp();
       return state.symbols[s];
     }
     function calcPositions() {
       const book = {};
-      const sorted = [...state.trades].sort((a,b) => Number(a.order || 0) - Number(b.order || 0));
-      for (const t of sorted) {
+      const events = [
+        ...state.trades.map(trade => ({ type: "trade", trade, order: Number(trade.order || 0) })),
+        ...(state.allocations || []).map(event => ({ type: "allocation", event, order: Number(event.order || 0) }))
+      ].sort((a, b) => a.order - b.order || (a.type === b.type ? 0 : a.type === "allocation" ? -1 : 1));
+      for (const item of events) {
+        if (item.type === "allocation") {
+          const symbol = String(item.event.symbol || "").toUpperCase().trim();
+          const p = book[symbol];
+          if (!p) continue;
+          const ratio = Math.max(0, Math.min(100, Number(item.event.coreRatio ?? 20))) / 100;
+          const totalShares = p.core + p.momentum;
+          p.core = totalShares * ratio;
+          p.momentum = totalShares - p.core;
+          p.coreCost = p.cost * ratio;
+          p.momentumCost = p.cost - p.coreCost;
+          continue;
+        }
+        const t = item.trade;
         const symbol = (t.symbol || "").toUpperCase().trim();
         if (!symbol) continue;
         ensureSymbol(symbol);
-        book[symbol] ||= { symbol, shares: 0, cost: 0, realized: 0, buys: 0, sells: 0 };
+        book[symbol] ||= { symbol, shares: 0, core: 0, momentum: 0, cost: 0, realized: 0, soldCost: 0, buys: 0, sells: 0 };
         const p = book[symbol];
         const shares = Number(t.shares || 0);
         const price = Number(t.price || 0);
         const amount = shares * price;
         if (t.side === "SELL") {
-          const avg = p.shares ? p.cost / p.shares : 0;
-          const sellShares = Math.min(shares, Math.max(0, p.shares));
+          const totalBefore = p.core + p.momentum;
+          const fullExit = t.bucket === "all" || shares >= totalBefore - 0.0000005;
+          const sellShares = fullExit ? totalBefore : Math.min(shares, Math.max(0, p.momentum));
+          const bucketAvg = p.momentum ? (p.momentumCost || 0) / p.momentum : 0;
+          const avg = fullExit && p.shares ? p.cost / p.shares : bucketAvg;
+          p.soldCost += avg * sellShares;
           p.realized += (price - avg) * sellShares;
           p.cost -= avg * sellShares;
           p.shares -= sellShares;
+          if (fullExit) { p.core = 0; p.momentum = 0; p.momentumCost = 0; p.coreCost = 0; }
+          else { p.momentum -= sellShares; p.momentumCost = Math.max(0, (p.momentumCost || 0) - avg * sellShares); }
           p.sells += amount;
         } else {
           p.shares += shares;
           p.cost += amount;
+          if (t.bucket === "split") {
+            const coreRatio = Math.max(0, Math.min(100, Number(t.coreRatio ?? 20))) / 100;
+            p.core += shares * coreRatio;
+            p.coreCost = (p.coreCost || 0) + amount * coreRatio;
+            p.momentum += shares * (1 - coreRatio);
+            p.momentumCost = (p.momentumCost || 0) + amount * (1 - coreRatio);
+          }
+          else if (t.bucket === "core") { p.core += shares; p.coreCost = (p.coreCost || 0) + amount; }
+          else { p.momentum += shares; p.momentumCost = (p.momentumCost || 0) + amount; }
           p.buys += amount;
         }
         if (Math.abs(p.shares) < 0.0000005) { p.shares = 0; p.cost = 0; }
@@ -1236,8 +1313,8 @@
           const unreal = market - p.cost;
           const avg = p.shares ? p.cost / p.shares : 0;
           const unrealPct = p.cost ? unreal / p.cost * 100 : 0;
-          const realizedPct = p.buys ? p.realized / p.buys * 100 : 0;
-          return { ...p, avg, current, market, unreal, unrealPct, realizedPct, core: p.shares * .2, momentum: p.shares * .8, meta };
+          const realizedPct = p.soldCost ? p.realized / p.soldCost * 100 : 0;
+          return { ...p, avg, current, market, unreal, unrealPct, realizedPct, meta };
         });
     }
     function calcMetrics(positions) {
@@ -1343,33 +1420,30 @@
       }
       return Object.fromEntries(Object.entries(book).map(([symbol, p]) => [symbol, p.realized]));
     }
-    function calcRealizedStatsBySymbol() {
+    function calcRealizedByTrade() {
       const book = {};
+      const realizedByTrade = {};
       const sorted = [...state.trades].sort((a,b) => Number(a.order || 0) - Number(b.order || 0));
       for (const t of sorted) {
         const symbol = (t.symbol || "").toUpperCase().trim();
         if (!symbol) continue;
-        book[symbol] ||= { shares: 0, cost: 0, realized: 0, buys: 0 };
+        book[symbol] ||= { shares: 0, cost: 0 };
         const p = book[symbol];
         const shares = Number(t.shares || 0);
         const price = Number(t.price || 0);
         if (t.side === "SELL") {
           const avg = p.shares ? p.cost / p.shares : 0;
           const sellShares = Math.min(shares, Math.max(0, p.shares));
-          p.realized += (price - avg) * sellShares;
+          realizedByTrade[t.id] = (price - avg) * sellShares;
           p.cost -= avg * sellShares;
           p.shares -= sellShares;
           if (Math.abs(p.shares) < 0.0000005) { p.shares = 0; p.cost = 0; }
         } else {
           p.shares += shares;
           p.cost += shares * price;
-          p.buys += shares * price;
         }
       }
-      return Object.fromEntries(Object.entries(book).map(([symbol, p]) => {
-        const pctValue = p.buys ? (p.realized / p.buys) * 100 : 0;
-        return [symbol, { realized: p.realized, buys: p.buys, pct: pctValue }];
-      }));
+      return realizedByTrade;
     }
     function buildEquitySeries(startMonthInput) {
       const startMonth = startMonthInput || state.settings.equityStartMonth || firstTradeMonth();
@@ -1408,7 +1482,7 @@
       let cumRealized = 0;
       let cumDeposits = 0;
       const yearlyRealizedMap = {};
-      return months.map(month => {
+      const series = months.map(month => {
         const monthlyRealized = Number(monthlyRealizedMap[month] || 0);
         const monthlyDeposit = Number(depositByMonth[month] || 0);
         const year = month.slice(0, 4);
@@ -1431,6 +1505,16 @@
           value: baseCapital + cumDeposits + cumRealized
         };
       });
+      if (series.length) {
+        const deposits = (state.deposits || []).reduce((sum, deposit) => sum + Number(deposit.amount || 0), 0);
+        const buyAmount = state.trades.filter(trade => trade.side !== "SELL").reduce((sum, trade) => sum + Number(trade.price || 0) * Number(trade.shares || 0), 0);
+        const sellAmount = state.trades.filter(trade => trade.side === "SELL").reduce((sum, trade) => sum + Number(trade.price || 0) * Number(trade.shares || 0), 0);
+        const cash = Number(state.settings.capital || 0) + deposits - buyAmount + sellAmount;
+        const currentMarket = calcPositions().reduce((sum, position) => sum + Number(position.market || 0), 0);
+        series[series.length - 1].value = cash + currentMarket;
+        series[series.length - 1].currentMarket = currentMarket;
+      }
+      return series;
     }
     function render() {
       save();
@@ -1491,10 +1575,10 @@
           <td>${money(p.market)}</td>
           <td class="${p.unreal >= 0 ? "good" : "bad"}">${money(p.unreal)} (${pctFmt.format(p.unrealPct)}%)</td>
           <td class="${p.realized >= 0 ? "good" : "bad"}">${money(p.realized)} (${pctFmt.format(p.realizedPct)}%)</td>
-          <td>${six(p.core)}</td>
-          <td>${six(p.momentum)}</td>
+          <td>${six(p.core)}<div class="ratio-control"><input data-symbol="${p.symbol}" data-field="coreRatio" type="number" min="0" max="100" step="1" value="${Number(p.meta.coreRatio ?? 20)}" aria-label="${p.symbol} 核心倉比例"><span>% 核心</span></div></td>
+          <td>${six(p.momentum)}<div class="ratio-control"><input data-symbol="${p.symbol}" data-field="momentumRatio" type="number" min="0" max="100" step="1" value="${100 - Number(p.meta.coreRatio ?? 20)}" aria-label="${p.symbol} 動能倉比例"><span>% 動能</span></div></td>
           <td><input data-symbol="${p.symbol}" data-field="maxInvest" type="number" step="0.01" value="${p.meta.maxInvest || ""}"></td>
-          <td>${money(Number(p.meta.maxInvest || 0) - Number(p.cost || 0))}</td>
+          <td>${remainingInvestment(p.meta.maxInvest, p.cost)}</td>
           <td class="left"><textarea data-symbol="${p.symbol}" data-field="note">${p.meta.note || ""}</textarea></td>
         </tr>`).join("") || `<tr><td colspan="13" class="left muted">尚無持股，先新增一筆交易。</td></tr>`;
       mobile.innerHTML = positions.map(p => `
@@ -1502,12 +1586,13 @@
           <div class="mini-row"><span class="symbol">${p.symbol}</span><strong>${six(p.shares)} 股</strong></div>
           <div class="mini-row"><span>市值 / 成本</span><strong>${money(p.market)} / ${money(p.cost)}</strong></div>
           <div class="mini-row"><span>未實現 / 已實現</span><strong class="${p.unreal >= 0 ? "good" : "bad"}">${money(p.unreal)} (${pctFmt.format(p.unrealPct)}%) / ${money(p.realized)} (${pctFmt.format(p.realizedPct)}%)</strong></div>
-          <div class="mini-row"><span>核心 / 動能</span><strong>${six(p.core)} / ${six(p.momentum)}</strong></div>
-          <div class="mini-row"><span>最大 / 剩餘投資額</span><strong>${money(Number(p.meta.maxInvest || 0))} / ${money(Number(p.meta.maxInvest || 0) - Number(p.cost || 0))}</strong></div>
+          <div class="mini-row"><span>核心倉 ${six(p.core)} 股</span><strong><input class="ratio-mobile" data-symbol="${p.symbol}" data-field="coreRatio" type="number" min="0" max="100" step="1" value="${Number(p.meta.coreRatio ?? 20)}" aria-label="${p.symbol} 核心倉比例"> %</strong></div>
+          <div class="mini-row"><span>動能倉 ${six(p.momentum)} 股</span><strong><input class="ratio-mobile" data-symbol="${p.symbol}" data-field="momentumRatio" type="number" min="0" max="100" step="1" value="${100 - Number(p.meta.coreRatio ?? 20)}" aria-label="${p.symbol} 動能倉比例"> %</strong></div>
+          <div class="mini-row"><span>最大 / 剩餘投資額</span><strong>${money(Number(p.meta.maxInvest || 0))} / ${remainingInvestment(p.meta.maxInvest, p.cost)}</strong></div>
         </div>`).join("") || `<div class="empty">尚無持股</div>`;
     }
     function renderTrades() {
-      const realizedBySymbol = calcRealizedStatsBySymbol();
+      const realizedByTrade = calcRealizedByTrade();
       const tradeRows = state.trades.map(t => ({ kind: "trade", date: t.date || "", id: t.id, item: t, seq: Number(t.order || 0) }));
       const depositRows = (state.deposits || []).map((d, i) => ({ kind: "deposit", date: d.date || "", id: d.id, item: d, seq: 1000000000 + i }));
       const rows = [...tradeRows, ...depositRows].sort((a, b) => {
@@ -1533,10 +1618,7 @@
             </tr>`;
         }
         const t = row.item;
-        const symbol = (t.symbol || "").toUpperCase().trim();
-        const realizedStats = realizedBySymbol[symbol] || { realized: 0, pct: 0 };
-        const realized = Number(realizedStats.realized || 0);
-        const realizedPct = Number(realizedStats.pct || 0);
+        const realized = Number(realizedByTrade[t.id] || 0);
         return `
         <tr>
           <td class="left">${t.date || ""}</td>
@@ -1545,7 +1627,7 @@
           <td>${money(t.price || 0)}</td>
           <td>${six(t.shares || 0)}</td>
           <td>${money(Number(t.price || 0) * Number(t.shares || 0))}</td>
-          <td class="${realized >= 0 ? "good" : "bad"}">${money(realized)} (${pctFmt.format(realizedPct)}%)</td>
+          <td class="${t.side === "SELL" ? (realized >= 0 ? "good" : "bad") : "muted"}">${t.side === "SELL" ? money(realized) : "—"}</td>
           <td class="left"><textarea data-trade="${t.id}" data-field="note" placeholder="備註">${t.note || ""}</textarea></td>
           <td><button class="danger" data-delete="${t.id}">刪除</button></td>
         </tr>`;
@@ -2301,9 +2383,21 @@
         const symbol = document.getElementById("tradeSymbol").value.toUpperCase().trim();
         if (!symbol) return;
         const price = Number(document.getElementById("tradePrice").value || 0);
-        const shares = Number(document.getElementById("tradeShares").value || 0);
+        let shares = Number(document.getElementById("tradeShares").value || 0);
+        if (!(shares > 0) || !(price > 0)) return;
         ensureSymbol(symbol);
-        state.trades.push({ id: uid(), order: state.nextTradeOrder++, date: document.getElementById("tradeDate").value, symbol, side: document.getElementById("tradeSide").value, price, shares, note: document.getElementById("tradeNote").value });
+        const side = document.getElementById("tradeSide").value;
+        const position = calcPositions().find(p => p.symbol === symbol);
+        let bucket = "momentum";
+        if (side === "SELL") {
+          if (!position) { alert(`${symbol} 目前沒有可賣出的持股。`); return; }
+          if (shares >= position.shares - 0.0000005) { shares = position.shares; bucket = "all"; }
+          else if (shares > position.momentum + 0.0000005) {
+            alert(`動能倉目前只有 ${six(position.momentum)} 股。部分平倉只能賣動能倉；若要連核心倉一起賣出，請輸入全部持股股數。`);
+            return;
+          }
+        } else bucket = "split";
+        state.trades.push({ id: uid(), order: state.nextTradeOrder++, date: document.getElementById("tradeDate").value, symbol, side, bucket, coreRatio: Number(state.symbols[symbol].coreRatio ?? 20), price, shares, note: document.getElementById("tradeNote").value });
         if (!state.symbols[symbol].currentPrice) state.symbols[symbol].currentPrice = price;
         e.target.reset();
         document.getElementById("tradeDate").valueAsDate = new Date();
@@ -2432,6 +2526,18 @@
       const el = e.target;
       if (el.dataset.symbol) {
         const meta = ensureSymbol(el.dataset.symbol);
+        if (el.dataset.field === "coreRatio" || el.dataset.field === "momentumRatio") {
+          const enteredRatio = Number(el.value);
+          const currentCoreRatio = Number(meta.coreRatio ?? 20);
+          const coreRatio = Math.max(0, Math.min(100, el.dataset.field === "coreRatio"
+            ? (Number.isFinite(enteredRatio) ? enteredRatio : currentCoreRatio)
+            : 100 - (Number.isFinite(enteredRatio) ? enteredRatio : 100 - currentCoreRatio)));
+          meta.coreRatio = coreRatio;
+          state.allocations ||= [];
+          state.allocations.push({ order: state.nextTradeOrder++, symbol: el.dataset.symbol.toUpperCase().trim(), coreRatio });
+          requestDeferredRender();
+          return;
+        }
         meta[el.dataset.field] = el.dataset.field === "note" ? el.value : Number(el.value || 0);
         requestDeferredRender();
       }
