@@ -1,0 +1,11 @@
+{
+  "name": "stock-war",
+  "forwardPorts": [4173],
+  "portsAttributes": {
+    "4173": {
+      "label": "stock-war",
+      "onAutoForward": "openBrowser"
+    }
+  },
+  "postStartCommand": "bash ./start-local.sh"
+}

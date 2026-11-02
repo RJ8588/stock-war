@@ -1,8 +1,8 @@
 {
   "scripts": {
-    "start": "node server.js",
-    "local": "PORT=4173 HOST=127.0.0.1 node server.js",
-    "start-local": "PORT=4173 HOST=127.0.0.1 node server.js"
+    "start": "bash ./start-local.sh",
+    "local": "bash ./start-local.sh",
+    "start-local": "bash ./start-local.sh"
   },
   "dependencies": {
     "pg": "^8.16.3"
