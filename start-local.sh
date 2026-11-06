@@ -11,6 +11,20 @@ PID_FILE="$LOG_DIR/stock-war.pid"
 
 mkdir -p "$LOG_DIR"
 
+cleanup_stale_launcher() {
+  local stale_pids=()
+
+  while read -r pid; do
+    [ -n "$pid" ] && stale_pids+=("$pid")
+  done < <(ps -eo pid,ppid,command --no-headers | awk '$3 ~ /bash \.\/start-local\.sh/ { print $1 }' | sort -u)
+
+  if [ "${#stale_pids[@]}" -gt 0 ]; then
+    echo "Stopping duplicate start-local.sh launcher(s): ${stale_pids[*]}"
+    kill "${stale_pids[@]}" 2>/dev/null || true
+    sleep 1
+  fi
+}
+
 cleanup_stale_port() {
   local pids=()
 
@@ -33,6 +47,7 @@ start_server() {
     return 0
   fi
 
+  cleanup_stale_launcher
   cleanup_stale_port
 
   echo "Starting stock-war at http://127.0.0.1:${PORT}/"
@@ -50,6 +65,7 @@ start_server() {
   return 1
 }
 
+cleanup_stale_launcher
 start_server || exit 1
 
 while true; do
@@ -60,6 +76,7 @@ while true; do
   fi
 
   echo "[$(date -Iseconds)] stock-war not responding; restarting..."
+  cleanup_stale_launcher
   cleanup_stale_port
   start_server || true
   sleep 2

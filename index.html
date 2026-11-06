@@ -1059,6 +1059,7 @@
     let latestLiveQuotes = Object.create(null);
     let quoteRefreshTimer = null;
     let quoteRefreshInFlight = false;
+    let serverStateSyncTimer = null;
     let lastTradingViewResolveSymbols = "";
     let lastTradingViewResolveAt = 0;
     let tradingViewResolveInFlight = false;
@@ -1238,6 +1239,27 @@
         return null;
       }
     }
+    async function syncServerStateFromRemote(force = false) {
+      if (!canUseServerState) return false;
+      try {
+        const remoteState = await loadServerState();
+        if (!remoteState) return false;
+        const remoteSignature = JSON.stringify(remoteState);
+        const localSignature = JSON.stringify(state);
+        if (!force && remoteSignature === localSignature) return false;
+        state = hydrateState(remoteState);
+        render();
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    function ensureServerStateSyncPolling() {
+      if (serverStateSyncTimer) return;
+      serverStateSyncTimer = setInterval(() => {
+        void syncServerStateFromRemote(false);
+      }, 15000);
+    }
     async function writeStateToDataFile(silent = true) {
       if (!dataFileHandle) return false;
       try {
@@ -1310,6 +1332,17 @@
       state.symbols[s].tp ||= defaultTp();
       return state.symbols[s];
     }
+    function getCurrentPriceForSymbol(symbol, fallback = 0) {
+      const normalized = String(symbol || "").trim().toUpperCase();
+      if (!normalized) return Number(fallback || 0);
+      const meta = ensureSymbol(normalized);
+      const livePrice = Number(latestLiveQuotes[normalized]?.price || 0);
+      if (livePrice > 0) {
+        if (Number(meta.currentPrice || 0) !== livePrice) meta.currentPrice = livePrice;
+        return livePrice;
+      }
+      return Number(meta.currentPrice || fallback || 0);
+    }
     function calcPositions() {
       const book = {};
       const events = [
@@ -1370,7 +1403,7 @@
       return Object.values(book).filter(p => p.shares > 0)
         .map(p => {
           const meta = ensureSymbol(p.symbol);
-          const current = Number(meta.currentPrice || 0);
+          const current = getCurrentPriceForSymbol(p.symbol, Number(meta.currentPrice || 0));
           const market = p.shares * current;
           const unreal = market - p.cost;
           const avg = p.shares ? p.cost / p.shares : 0;
@@ -2072,8 +2105,8 @@
         const [exchange, symbol] = row.tvSymbol.split(":");
         const meta = state.symbols?.[row.symbol] || {};
         const position = positionMap.get(row.symbol);
+        const price = getCurrentPriceForSymbol(row.symbol, Number(meta.currentPrice || 0));
         const livePrice = Number(latestLiveQuotes[row.symbol]?.price || 0);
-        const price = livePrice || Number(meta.currentPrice || 0);
         const avg = Number(position?.avg || 0);
         const pnlPct = avg && price ? (price - avg) / avg * 100 : 0;
         card.className = "tv-price-card";
@@ -2325,8 +2358,11 @@
         if (!symbol || !Number.isFinite(price) || price <= 0) continue;
         const exchange = String(quote.exchange || "").toUpperCase();
         const previous = latestLiveQuotes[symbol];
-        if (!previous || previous.price !== price || previous.exchange !== exchange) changed = true;
+        const meta = ensureSymbol(symbol);
+        const previousStored = Number(meta.currentPrice || 0);
+        if (!previous || previous.price !== price || previous.exchange !== exchange || previousStored !== price) changed = true;
         latestLiveQuotes[symbol] = { price, exchange };
+        meta.currentPrice = price;
       }
       return changed;
     }
@@ -2337,16 +2373,17 @@
       if (!symbols.length) return false;
       const signature = symbols.join(",");
       const now = Date.now();
-      if (signature === lastQuoteFetchSymbols && now - lastQuoteFetchAt < 30000) return false;
+      if (signature === lastQuoteFetchSymbols && now - lastQuoteFetchAt < 60000) return false;
       quoteRefreshInFlight = true;
       try {
         const response = await fetch(`/api/quotes?symbols=${encodeURIComponent(symbols.join(","))}`, { cache: "no-store" });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const payload = await response.json();
-        const changed = applyTradingViewQuotes(Array.isArray(payload?.quotes) ? payload.quotes : []);
+        const quotes = Array.isArray(payload?.quotes) ? payload.quotes : [];
+        const changed = applyTradingViewQuotes(quotes);
         lastQuoteFetchSymbols = signature;
         lastQuoteFetchAt = now;
-        if (changed) renderTradingView(calcPositions());
+        if (quotes.length || changed) render();
         return changed;
       } catch (error) {
         if (!silent) alert(`TradingView 即時報價抓取失敗：${String(error?.message || error)}`);
@@ -2357,7 +2394,7 @@
     }
     function ensureTradingViewQuotePolling() {
       if (quoteRefreshTimer) return;
-      quoteRefreshTimer = setInterval(() => refreshTradingViewQuotes(true), 30000);
+      quoteRefreshTimer = setInterval(() => refreshTradingViewQuotes(true), 60000);
     }
     function chartOpts() {
       return {
@@ -2373,12 +2410,9 @@
         <div class="panel">
           <div class="panel-head">
             <h2>TradingView 即時股價</h2>
-            <span class="note">即時行情僅顯示於此卡片；持股明細現價為手動固定，供市值與損益計算</span>
+            <span class="note">持股 ticker 會自動同步到右側行情列表</span>
           </div>
           <div id="tradingViewWidget" class="tv-widget-container"></div>
-          <div class="panel-body subpanel">
-            <div id="fearGreedPanel" class="empty">載入 CNN 官方市場情緒資料中...</div>
-          </div>
         </div>
         <div class="panel">
           <div class="panel-head"><h2>資產配置</h2></div>
@@ -2904,6 +2938,7 @@
       bindEvents();
       render();
       ensureTradingViewQuotePolling();
+      ensureServerStateSyncPolling();
       ensureFearGreedPolling();
       refreshFearGreedPanel(true);
       refreshShortYield(true);

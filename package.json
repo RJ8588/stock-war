@@ -5,6 +5,23 @@
     "start-local": "bash ./start-local.sh"
   },
   "dependencies": {
-    "pg": "^8.16.3"
-  }
+    "pg": "^8.16.3",
+    "playwright": "^1.65.0"
+  },
+  "name": "stock-war",
+  "version": "1.0.0",
+  "description": "- 程式碼可以透過 GitHub 更新；持倉、交易、入金、比例設定等使用者資料存放在 Replit PostgreSQL 的 `dashboard_state` 資料列，不放進 GitHub。 - Replit 正式環境需提供 `DATABASE_URL`。若正式環境是 Replit、但沒有設定資料庫連線，伺服器會停止啟動，避免靜默退回可能隨重新部署消失的本機檔案。 - 本機開發及未設定資料庫的非正式環境仍使用 `.data/dashboard-state.json`；此資料夾已加入 `.gitignore`，請勿移除忽略規則或提交其中的資料。 - GitHub.dev / Codespaces 預覽必須以 `HOST=0.0.0.0` 綁定，避免 `127.0.0.1` 只允許本機存取。啟動腳本已修正為固定在 `PORT=4173`、`HOST=0.0.0.0`。 - Codespaces 啟動時，`.devcontainer/devcontainer.json` 會自動執行 `postStartCommand`，因此每次開啟容器都會自動檢查並啟動 `node server.js`。 - 第一次連接資料庫時，伺服器會優先沿用現存的 `.data/dashboard-state.json`。若該檔案不存在，瀏覽器仍會從原有 `localStorage` 載入資料，並在啟動後同步至資料庫。",
+  "main": "server.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RJ8588/stock-war.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/RJ8588/stock-war/issues"
+  },
+  "homepage": "https://github.com/RJ8588/stock-war#readme"
 }
