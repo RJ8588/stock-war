@@ -8,8 +8,15 @@ HOST=0.0.0.0
 LOG_DIR=".data"
 LOG_FILE="$LOG_DIR/stock-war.log"
 PID_FILE="$LOG_DIR/stock-war.pid"
+BUILD_ID="$(sha256sum server.js | cut -c1-16)"
 
 mkdir -p "$LOG_DIR"
+
+is_current_server_running() {
+  local health
+  health=$(curl -fsS "http://127.0.0.1:${PORT}/api/health" 2>/dev/null) || return 1
+  [[ "$health" == *'"service":"stock-war"'* && "$health" == *"\"buildId\":\"${BUILD_ID}\""* && "$health" == *'"quoteApi":"tradingview-scanner"'* ]]
+}
 
 cleanup_stale_launcher() {
   local stale_pids=()
@@ -42,8 +49,8 @@ cleanup_stale_port() {
 }
 
 start_server() {
-  if curl -fsS "http://127.0.0.1:${PORT}/" >/dev/null 2>&1; then
-    echo "stock-war is already running on http://127.0.0.1:${PORT}/"
+  if is_current_server_running; then
+    echo "Current stock-war build is already running on http://127.0.0.1:${PORT}/"
     return 0
   fi
 
@@ -56,7 +63,7 @@ start_server() {
   echo "$pid" > "$PID_FILE"
 
   sleep 2
-  if curl -fsS "http://127.0.0.1:${PORT}/" >/dev/null 2>&1; then
+  if is_current_server_running; then
     echo "Background server started successfully."
     return 0
   fi
@@ -69,8 +76,8 @@ cleanup_stale_launcher
 start_server || exit 1
 
 while true; do
-  if curl -fsS "http://127.0.0.1:${PORT}/" >/dev/null 2>&1; then
-    echo "stock-war is healthy on http://127.0.0.1:${PORT}/"
+  if is_current_server_running; then
+    echo "Current stock-war build is healthy on http://127.0.0.1:${PORT}/"
     sleep 10
     continue
   fi

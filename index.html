@@ -394,16 +394,20 @@
       display: grid;
       gap: 8px;
       margin-top: 12px;
+      width: 100%;
+      min-width: 0;
     }
     .allocation-item {
       display: grid;
-      grid-template-columns: 14px minmax(max-content, 1fr) minmax(112px, 132px);
-      gap: 10px;
+      grid-template-columns: 10px minmax(0, 1fr) max-content;
+      gap: 8px;
       align-items: center;
       min-height: 38px;
       padding: 6px 0;
       color: var(--muted);
       font-size: 13px;
+      width: 100%;
+      min-width: 0;
     }
     .allocation-swatch {
       width: 10px;
@@ -415,6 +419,7 @@
       display: grid;
       gap: 2px;
       min-width: 0;
+      text-align: left;
     }
     .allocation-name {
       color: var(--text);
@@ -429,8 +434,8 @@
       justify-items: end;
       gap: 2px;
       text-align: right;
-      min-width: 0;
-      width: 100%;
+      min-width: max-content;
+      white-space: nowrap;
     }
     .allocation-value strong {
       color: var(--text);
@@ -679,7 +684,11 @@
       background: #0c121b;
     }
     .backtest-rules strong { color: var(--text); }
-    .split { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+    .panel-body.split > * { min-width: 0; }
+    @media (min-width: 721px) {
+      #allocationText.empty { padding: 14px 12px; }
+    }
     .empty { color: var(--muted); padding: 20px; text-align: center; border: 1px dashed var(--line); border-radius: var(--radius); }
     .mobile-card { display: none; }
     @media (max-width: 1180px) {

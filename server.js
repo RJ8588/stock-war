@@ -1,8 +1,11 @@
 const http = require("http");
 const fs = require("fs/promises");
+const fsSync = require("fs");
+const crypto = require("crypto");
 const path = require("path");
 
 const root = __dirname;
+const appBuildId = crypto.createHash("sha256").update(fsSync.readFileSync(__filename)).digest("hex").slice(0, 16);
 const port = Number(process.env.PORT || 4173);
 const host = process.env.HOST || "0.0.0.0";
 const stateFile = path.join(root, ".data", "dashboard-state.json");
@@ -451,6 +454,10 @@ function send(res, status, body, contentType = "text/plain; charset=utf-8") {
 const dashboardServer = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://127.0.0.1:${port}`);
+    if (url.pathname === "/api/health" && req.method === "GET") {
+      send(res, 200, JSON.stringify({ service: "stock-war", buildId: appBuildId, quoteApi: "tradingview-scanner" }), "application/json; charset=utf-8");
+      return;
+    }
     if (url.pathname === "/api/state") {
       if (req.method === "GET") {
         const state = await readDashboardState();
